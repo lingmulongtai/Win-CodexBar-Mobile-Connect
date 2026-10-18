@@ -14,7 +14,13 @@ This fork's Windows EXE is **unsigned** and uses no upstream signing certificate
 
 ## What this fork adds
 
-v0.71.1 adds persistent Gemini sign-in and durable 7/30-day PC quota history. **Mobile Connect** has its own settings pane, shared PC history, Usage & Spend charts on Android/tablets and opt-in remote PC settings. **Use Android v0.10.0 or later for shared history, spend and PC controls.** [Changes, screenshots and verification](docs/releases/v0.71.0.md)
+v0.71.1 adds persistent Gemini sign-in and durable 7/30-day PC quota history. **Mobile Connect** has its own settings pane, shared PC history, Usage & Spend charts on Android/tablets and opt-in remote PC settings. **Use Android v0.10.0 or later for shared history, spend and PC controls.** [Changes, screenshots and verification](docs/releases/v0.71.1.md)
+
+The following captures use the downloaded, published **v0.71.1 EXE** on Windows. They show WebView2 content captured through CDP with anonymous demo UI data; they are not native frame/tray captures or a month of live measurements.
+
+| 7 days | 30 days |
+| --- | --- |
+| ![Published v0.71.1 seven-day archive, demo data](docs/images/mobile-connect/windows-v0.71.1-history-7days-ja.jpg) | ![Published v0.71.1 thirty-day archive, demo data](docs/images/mobile-connect/windows-v0.71.1-history-30days-ja.jpg) |
 
 ![Mobile Connect pane in the downloaded, published v0.71.0 EXE, using isolated demo settings](docs/images/mobile-connect/windows-v0.71.0-mobile-connect-ja.jpg)
 
