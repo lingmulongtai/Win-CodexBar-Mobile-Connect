@@ -1692,22 +1692,33 @@ pub fn get_deepseek_pricing_status(
 
 #[tauri::command]
 pub async fn refresh_providers(app: tauri::AppHandle) -> Result<(), String> {
+    if crate::desktop_peer::view(&app).is_some() {
+        crate::desktop_peer::refresh_desktop_peer(app).await;
+        return Ok(());
+    }
     do_refresh_providers(&app).await
 }
 
 #[tauri::command]
 pub async fn refresh_providers_if_stale(app: tauri::AppHandle) -> Result<(), String> {
+    if crate::desktop_peer::view(&app).is_some() {
+        crate::desktop_peer::refresh_desktop_peer(app).await;
+        return Ok(());
+    }
     do_refresh_providers_if_stale(&app).await
 }
 
 #[tauri::command]
 pub fn get_cached_providers(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Mutex<AppState>>,
 ) -> Vec<ProviderUsagePresentationSnapshot> {
-    let snapshots = state
-        .lock()
-        .map(|guard| guard.provider_cache.clone())
-        .unwrap_or_default();
+    let snapshots = crate::desktop_peer::display_providers(&app).unwrap_or_else(|| {
+        state
+            .lock()
+            .map(|guard| guard.provider_cache.clone())
+            .unwrap_or_default()
+    });
     let settings = Settings::load();
 
     snapshots

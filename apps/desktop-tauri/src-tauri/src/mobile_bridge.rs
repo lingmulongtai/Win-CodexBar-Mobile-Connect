@@ -653,7 +653,22 @@ pub(crate) async fn get_provider_quota_history(
     app: tauri::AppHandle,
     provider_id: String,
     expected_updated_at: String,
+    expected_source: Option<String>,
 ) -> Vec<mobile_bridge::MobileQuotaHistory> {
+    if let Some(history) = crate::desktop_peer::history(
+        &app,
+        &provider_id,
+        &expected_updated_at,
+        expected_source.as_deref().unwrap_or("local"),
+    ) {
+        return history;
+    }
+    if expected_source
+        .as_deref()
+        .is_some_and(|source| source.starts_with("peer:"))
+    {
+        return Vec::new();
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let Some(id) = ProviderId::from_cli_name(&provider_id) else {
             return Vec::new();

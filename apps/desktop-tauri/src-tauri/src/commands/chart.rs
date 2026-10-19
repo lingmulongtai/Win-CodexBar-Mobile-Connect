@@ -136,10 +136,14 @@ pub struct ProviderChartData {
 
 #[tauri::command]
 pub async fn get_provider_chart_data(
+    app: tauri::AppHandle,
     state: tauri::State<'_, std::sync::Mutex<AppState>>,
     provider_id: String,
     account_email: Option<String>,
 ) -> Result<ProviderChartData, String> {
+    if let Some(chart) = crate::desktop_peer::chart(&app, &provider_id) {
+        return Ok(chart);
+    }
     let fallback_provider_id = provider_id.clone();
     let (weekly_window, cached_account_email) =
         current_history_context(&state, &provider_id).unwrap_or((None, None));
@@ -163,8 +167,12 @@ pub async fn get_provider_chart_data(
 
 #[tauri::command]
 pub async fn get_provider_local_usage_summary(
+    app: tauri::AppHandle,
     provider_id: String,
 ) -> Option<ProviderLocalUsageSummary> {
+    if let Some(usage) = crate::desktop_peer::local_usage(&app, &provider_id) {
+        return usage;
+    }
     let failure_provider_id = provider_id.clone();
     tauri::async_runtime::spawn_blocking(move || load_provider_local_usage_summary(&provider_id))
         .await

@@ -164,7 +164,7 @@ pub(crate) fn schedule_spend_refresh(app: &tauri::AppHandle) {
             }
         }
         let _running = RunningGuard;
-        if crate::commands::get_usage_spend_summary(
+        if crate::commands::get_local_usage_spend_summary(
             app.state::<Mutex<AppState>>(),
             Some(settings.spend_dashboard_period.to_string()),
             Some(false),
