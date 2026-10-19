@@ -31,3 +31,9 @@ Desktop receiving has a separate protected connection store and generation-check
 Native tray updates resolve their current source inside a UI-thread task. Source-selection commands run synchronously on that thread, so queued background refreshes cannot publish captured values from a previous PC. No receiver lock is held while calling native tray APIs.
 
 Validation on Windows: shell check and all-target Clippy with `-D warnings` passed. Four focused tests cover delayed publication after switching/disconnecting, retaining last good data with offline status, private status payloads, missing quotas and remote spend/local-usage projection. Native Mac CI and desktop UI acceptance are recorded separately when complete.
+
+## Protected storage on Mac
+
+Mac uses the existing keyring dependency's native Apple backend. Secret-bearing files use AES-256-GCM with a random nonce and authenticated format header; the 32-byte master key stays in the login Keychain. A process mutex and file lock serialize initial key creation across CLI/desktop processes. A durable initialization marker prevents replacing a lost key. Keychain errors never fall back to plaintext, and reads of existing ciphertext require no config-directory writes. Windows DPAPI behavior and its storage namespace are unchanged; Mac has its own stable namespace.
+
+Validation on Windows: all 11 secure-file tests and core all-target Clippy passed. Unit fixtures use an in-process test key on Mac; the normal-build `secure_file_probe` explicitly exercises real Keychain persistence in native CI, including concurrent first use and reading while config storage is read-only. Native execution remains pending until that CI runs.

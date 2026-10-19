@@ -21,6 +21,9 @@ pub fn safe_error_message(err: impl std::fmt::Display) -> String {
 
 /// Canonical application config root that hosts the settings file and logs.
 pub fn config_root() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    return dirs::config_dir().map(|p| p.join("CodexBar-Mac-Mobile-Connect"));
+    #[cfg(not(target_os = "macos"))]
     dirs::config_dir().map(|p| p.join("Win-CodexBar-Mobile"))
 }
 

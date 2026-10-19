@@ -10,6 +10,9 @@ const FORMAT: &str = "codexbar.secure-file";
 const VERSION: u32 = 1;
 const WINDOWS_DPAPI_USER: &str = "windows-dpapi-user";
 const WINDOWS_DPAPI_MACHINE: &str = "windows-dpapi-machine";
+const MACOS_KEYCHAIN: &str = "macos-keychain-aes256-gcm";
+#[cfg(any(target_os = "macos", test))]
+mod macos;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ProtectedFile {
@@ -53,7 +56,9 @@ pub fn status(path: &Path) -> SecureFileStatus {
     }
 
     match file.protection.as_str() {
-        WINDOWS_DPAPI_USER | WINDOWS_DPAPI_MACHINE => SecureFileStatus::Protected(file.protection),
+        WINDOWS_DPAPI_USER | WINDOWS_DPAPI_MACHINE | MACOS_KEYCHAIN => {
+            SecureFileStatus::Protected(file.protection)
+        }
         other => {
             SecureFileStatus::Unreadable(format!("unsupported secure file protection {other}"))
         }
@@ -78,6 +83,7 @@ pub fn read_string(path: &Path) -> io::Result<String> {
     }
 
     match file.protection.as_str() {
+        MACOS_KEYCHAIN => read_macos_file(&file.payload),
         WINDOWS_DPAPI_USER | WINDOWS_DPAPI_MACHINE => {
             let encrypted = base64::engine::general_purpose::STANDARD
                 .decode(file.payload.as_bytes())
@@ -92,12 +98,29 @@ pub fn read_string(path: &Path) -> io::Result<String> {
     }
 }
 
-/// Write a UTF-8 file, protecting it with Windows DPAPI when available.
+/// Write a UTF-8 file with Windows DPAPI or macOS Keychain-backed encryption.
 ///
 /// The protected bytes are staged in an owner-only sibling, synced, and then
 /// published atomically, so a failed or interrupted write leaves the previous
 /// file intact and a partly written secret is never the live file.
 pub fn write_string(path: &Path, contents: &str) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let bytes = {
+        let may_create = matches!(
+            status(path),
+            SecureFileStatus::Missing | SecureFileStatus::Plaintext
+        );
+        let key = macos::master_key(may_create)?;
+        let encrypted = macos::encrypt(contents.as_bytes(), &key)?;
+        serde_json::to_vec_pretty(&ProtectedFile {
+            format: FORMAT.to_owned(),
+            version: VERSION,
+            protection: MACOS_KEYCHAIN.to_owned(),
+            payload: base64::engine::general_purpose::STANDARD.encode(encrypted),
+        })
+        .map_err(io::Error::other)?
+    };
+    #[cfg(not(target_os = "macos"))]
     let bytes = protected_file_bytes(contents)?;
     crate::atomic_file::write_atomic_private(path, &bytes).map_err(|error| {
         match error.downcast::<io::Error>() {
@@ -119,9 +142,27 @@ fn protected_file_bytes(contents: &str) -> io::Result<Vec<u8>> {
     serde_json::to_vec_pretty(&file).map_err(io::Error::other)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn protected_file_bytes(contents: &str) -> io::Result<Vec<u8>> {
     Ok(contents.as_bytes().to_vec())
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_file(payload: &str) -> io::Result<String> {
+    let encrypted = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid secure file payload"))?;
+    let plain = macos::decrypt(&encrypted, &macos::read_key()?)?;
+    String::from_utf8(plain)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid secure file text"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_macos_file(_payload: &str) -> io::Result<String> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "macOS Keychain-protected files must be read on the original Mac",
+    ))
 }
 
 #[cfg(windows)]
