@@ -4,7 +4,6 @@
 //! TTY launching do not drift into separate path lists.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Locate the Codex CLI for shell integrations that need to reopen a session.
 pub fn locate_codex_binary() -> Option<PathBuf> {
@@ -81,6 +80,7 @@ fn versioned_binaries(root: &Path) -> Vec<PathBuf> {
 #[cfg(windows)]
 fn desktop_package_binary() -> Option<PathBuf> {
     use std::os::windows::process::CommandExt;
+    use std::process::Command;
 
     let powershell = PathBuf::from(std::env::var_os("WINDIR")?)
         .join("System32/WindowsPowerShell/v1.0/powershell.exe");

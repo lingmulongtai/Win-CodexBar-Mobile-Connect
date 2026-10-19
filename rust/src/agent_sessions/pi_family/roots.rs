@@ -180,6 +180,10 @@ impl DirectoryScanBudget {
         Some(canonicalize_for_scan(path))
     }
 
+    #[cfg_attr(
+        not(windows),
+        allow(dead_code, reason = "only Windows Claude Desktop discovery reads it")
+    )]
     pub(crate) fn max_depth(&self) -> usize {
         self.max_depth
     }

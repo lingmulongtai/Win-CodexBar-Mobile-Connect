@@ -319,6 +319,7 @@ mod tests {
         assert!(log_path_for(&traversal, &roots).is_none());
     }
 
+    #[cfg(windows)]
     #[test]
     fn log_path_match_ignores_trailing_separator_and_case() {
         let dir = tempfile::tempdir().expect("tempdir");

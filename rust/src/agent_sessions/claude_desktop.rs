@@ -5,6 +5,13 @@
 //! walks only the two known session roots to a shallow fixed depth and returns
 //! nested `.claude/projects` directories. Every directory/type/path operation
 //! shares the caller's metadata scan budget.
+#![cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "the traversal stays platform-neutral so tests cover it, but only Windows calls it"
+    )
+)]
 
 use super::pi_family::DirectoryScanBudget;
 use std::collections::HashSet;
