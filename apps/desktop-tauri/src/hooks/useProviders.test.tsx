@@ -135,6 +135,29 @@ describe("useProviders", () => {
     expect(result.current.providers[0]?.primary.usedPercent).toBe(80);
   });
 
+  it("discards a delayed settings status read after switching PCs", async () => {
+    const first = { selectedId: "home", sourceId: "peer:home:1", name: "Home", receiving: false };
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue(first);
+    tauriMocks.getCachedProviders.mockResolvedValue([{ ...provider("codex", 20), sourceLabel: "peer:home:1|a" }]);
+    const { result } = renderHook(() => useProviders({ refreshOnMount: false }));
+    await waitFor(() => expect(result.current.providers[0]?.primary.usedPercent).toBe(20));
+
+    let finish!: (status: typeof first) => void;
+    tauriMocks.getDesktopPeerStatus.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    act(() => emitProviderEvent("settings-changed", undefined));
+    expect(tauriMocks.getDesktopPeerStatus).toHaveBeenCalledTimes(2);
+
+    const second = { ...first, selectedId: "work", sourceId: "peer:work:2", name: "Work" };
+    tauriMocks.getCachedProviders.mockResolvedValue([{ ...provider("codex", 80), sourceLabel: "peer:work:2|a" }]);
+    act(() => emitProviderEvent("desktop-peer-changed", second));
+    await waitFor(() => expect(result.current.providers[0]?.primary.usedPercent).toBe(80));
+
+    await act(async () => finish(first));
+    expect(result.current.peer?.sourceId).toBe(second.sourceId);
+    expect(result.current.providers[0]?.primary.usedPercent).toBe(80);
+    expect(tauriMocks.getCachedProviders).toHaveBeenCalledTimes(2);
+  });
+
   it("can defer the stale-aware refresh on mount", async () => {
     vi.useFakeTimers();
     try {

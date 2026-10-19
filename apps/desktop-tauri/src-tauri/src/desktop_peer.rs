@@ -173,7 +173,13 @@ pub(crate) fn install(app: tauri::AppHandle) {
 }
 
 fn emit(app: &tauri::AppHandle) {
-    let _ = app.emit("desktop-peer-changed", get_desktop_peer_status(app.clone()));
+    let handle = app.clone();
+    // Source changes run on the UI thread too. Resolve status there so a
+    // delayed poll notification cannot publish a previously selected PC.
+    let _ = app.run_on_main_thread(move || {
+        let status = get_desktop_peer_status(handle.clone());
+        let _ = handle.emit("desktop-peer-changed", status);
+    });
     crate::tray_bridge::refresh_tray_presentation(app);
 }
 

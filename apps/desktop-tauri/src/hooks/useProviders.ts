@@ -195,7 +195,10 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
 
     const unlistenSettings = listen("settings-changed", () => {
       if (sourceRef.current !== "local") {
-        void getDesktopPeerStatus().then(receiveSource).catch(() => {});
+        const epoch = settingsReloadEpochRef.current;
+        void getDesktopPeerStatus().then(status => {
+          if (epoch === settingsReloadEpochRef.current) receiveSource(status);
+        }).catch(() => {});
         return;
       }
       const epoch = ++settingsReloadEpochRef.current;
