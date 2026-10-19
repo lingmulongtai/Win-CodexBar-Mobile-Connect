@@ -38,6 +38,12 @@ Mac uses the existing keyring dependency's native Apple backend. Secret-bearing 
 
 Validation on Windows: all 11 secure-file tests and core all-target Clippy passed. Unit fixtures use an in-process test key on Mac; the normal-build `secure_file_probe` explicitly exercises real Keychain persistence in native CI, including concurrent first use and reading while config storage is read-only. Native execution remains pending until that CI runs.
 
+## Native Mac test isolation
+
+Native run [39325148398](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect/actions/runs/39325148398) passed real Keychain concurrency/read-only probes and 4,810 core tests (2 ignored) on both architectures. It was cancelled after the shell's account-persistence test stopped making progress. That test uses the core as a normal dependency, so the core's `cfg(test)` key fixture did not apply and it reached the same real Keychain item created by the separate probe executable. Four further shell failures exposed Windows-only watcher/path assumptions.
+
+The Mac shell now activates `test-secure-storage` only through its dev-dependency. Its process-random key never touches Keychain. Non-debug builds reject that feature at compile time, and the native probe rejects it at runtime. Cargo's Mac dependency graph confirms the feature is absent from normal/build edges and present only with dev edges. Released bundles still compile and exercise the real backend. Windows-specific fixtures are gated; a non-Windows test verifies that unavailable auto-resume does not create a watcher. Native CI separates compilation from test execution, each with a bounded timeout.
+
 ## Native Windows receiver verification
 
 At source `5aac54214af09568a1ff720838812e744b5a99a2`, the Windows workspace passed 4,872 core tests (2 ignored), 1 CLI test and 788 shell tests. Frontend passed 1,357/1,357 tests, lint and production build; after the native layout adjustment its 65 affected tests and build passed again. Workspace all-target Clippy with `-D warnings` passed before that frontend-only adjustment. All 24 locale tests passed, including completeness and placeholder parity for every supported language.
