@@ -65,9 +65,9 @@ History and spend use the selected PC’s saved observations, reporting period a
 
 Native Windows v0.72.0 development build, isolated synthetic profiles; the images do not contain account data or connection keys.
 
-![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.png)
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.jpg)
 
-![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.png)
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.jpg)
 
 ## Connect
 

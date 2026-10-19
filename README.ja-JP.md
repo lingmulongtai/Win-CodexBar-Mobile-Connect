@@ -53,9 +53,9 @@ v0.71.0では、独立した「モバイル接続」タブ、PCに保存する�
 
 ネイティブWindows v0.72.0開発ビルドで、独立したデモ設定を使用しています。実アカウントや接続キーは含みません。
 
-![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.png)
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.jpg)
 
-![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.png)
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.jpg)
 
 ## スマホとの接続
 
