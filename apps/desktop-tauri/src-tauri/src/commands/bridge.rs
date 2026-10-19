@@ -994,8 +994,8 @@ struct PlatformCapabilities {
     powertoys: bool,
 }
 
-impl Default for PlatformCapabilities {
-    fn default() -> Self {
+impl PlatformCapabilities {
+    fn current() -> Self {
         Self {
             start_at_login: cfg!(windows),
             notifications: cfg!(windows),
@@ -1194,7 +1194,7 @@ impl From<Settings> for SettingsSnapshot {
             .collect();
 
         Self {
-            platform_capabilities: PlatformCapabilities::default(),
+            platform_capabilities: PlatformCapabilities::current(),
             preferred_currency_code: settings.preferred_currency_code,
             enabled_providers,
             provider_order,

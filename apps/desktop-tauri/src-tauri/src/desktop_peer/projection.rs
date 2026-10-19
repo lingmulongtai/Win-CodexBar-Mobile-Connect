@@ -56,9 +56,9 @@ pub(super) fn providers(view: &PeerView) -> Vec<ProviderUsageSnapshot> {
         serde_json::from_value(json!({
             "providerId": p.id, "displayName": id.display_name(),
             "sourceLabel": source_id(view, p), "updatedAt": timestamp(p.updated_at_epoch_seconds),
-            "primary": p.windows.first().map(&window).unwrap_or_else(|| json!({"usedPercent": 0.0, "isInformational": true})),
+            "primary": p.windows.first().map(window).unwrap_or_else(|| json!({"usedPercent": 0.0, "isInformational": true})),
             "primaryLabel": p.windows.first().map(|w| &w.label),
-            "secondary": p.windows.get(1).map(&window), "secondaryLabel": p.windows.get(1).map(|w| &w.label),
+            "secondary": p.windows.get(1).map(window), "secondaryLabel": p.windows.get(1).map(|w| &w.label),
             "extraRateWindows": p.windows.iter().enumerate().skip(2).map(|(i,w)| json!({"id": format!("peer-window-{i}"), "title": w.label, "window": window(w)})).collect::<Vec<_>>(),
             "inventory": p.reset_credits.iter().map(|credits| json!({"id": "reset-credits", "title": "Reset credits", "availableCount": credits.available_count, "nextExpiresAt": credits.expires_at_epoch_seconds.iter().min().copied().map(timestamp)})).collect::<Vec<_>>(),
             "cost": cost, "paceAuthoritative": false, "errorState": state,
