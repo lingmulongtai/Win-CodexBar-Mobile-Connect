@@ -310,6 +310,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn auto_resume_watcher_is_separate_from_user_refresh_cadence() {
         let mut settings = Settings {
@@ -346,6 +347,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn auto_resume_caps_adaptive_idle_cadence() {
         let _guard = ADAPTIVE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -376,6 +378,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn auto_resume_watcher_uses_low_power_floor() {
         let mut settings = Settings {
@@ -389,6 +392,23 @@ mod tests {
             resolve_auto_resume_refresh_interval(&settings),
             Some(Duration::from_secs(30 * 60))
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unavailable_auto_resume_does_not_add_a_refresh_watcher() {
+        for preference in [
+            codexbar::settings::LowPowerModePreference::Off,
+            codexbar::settings::LowPowerModePreference::On,
+        ] {
+            let mut settings = Settings {
+                enabled_providers: ["codex".to_string()].into_iter().collect(),
+                low_power_mode_preference: preference,
+                ..Default::default()
+            };
+            settings.set_auto_resume_after_quota_reset(ProviderId::Codex, true);
+            assert_eq!(resolve_auto_resume_refresh_interval(&settings), None);
+        }
     }
 
     #[test]

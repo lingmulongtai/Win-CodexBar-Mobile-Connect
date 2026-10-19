@@ -111,7 +111,7 @@ pub fn matches_current_exe(entry_path: &str, exe_path: &std::path::Path) -> bool
 
 /// True when both paths end with the same file name (case-insensitive).
 /// Used as a fallback when the full path differs after an install-dir move.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 pub fn matches_exe_file_name(entry_path: &str, exe_path: &std::path::Path) -> bool {
     let entry_name = normalize_exe_path(entry_path)
         .rsplit('\\')
@@ -369,6 +369,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn matches_exe_file_name_across_install_dirs() {
         assert!(matches_exe_file_name(
