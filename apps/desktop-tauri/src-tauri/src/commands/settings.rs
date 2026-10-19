@@ -135,6 +135,24 @@ pub struct SettingsUpdate {
 }
 
 impl SettingsUpdate {
+    fn validate_platform(&self, windows: bool) -> Result<(), String> {
+        if !windows
+            && (self.start_at_login == Some(true)
+                || self.show_notifications == Some(true)
+                || self.session_quota_notifications_enabled == Some(true)
+                || self.limit_reset_notifications_enabled == Some(true)
+                || self.credential_expiry_notifications_enabled == Some(true)
+                || self.predictive_pace_warning_enabled == Some(true)
+                || self.sound_enabled == Some(true)
+                || self.stay_awake_enabled == Some(true)
+                || self.powertoys_status_pipe_enabled == Some(true)
+                || self.low_power_mode_preference.as_deref() == Some("automatic"))
+        {
+            return Err("This native integration is currently available on Windows only".into());
+        }
+        Ok(())
+    }
+
     fn refreshes_provider_data(&self) -> bool {
         self.enabled_providers.is_some()
             || self.claude_allow_reading_claude_code_credentials.is_some()
@@ -758,6 +776,7 @@ pub(crate) fn update_settings_checked(
     patch: SettingsUpdate,
     expected_revision: Option<&str>,
 ) -> Result<SettingsSnapshot, String> {
+    patch.validate_platform(cfg!(windows))?;
     let write_guard = UPDATE_SETTINGS_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1583,6 +1602,39 @@ mod tests {
         assert_eq!(map["previous"], "left");
         assert_eq!(map["select9"], "ctrl+9");
         assert_eq!(map.as_object().unwrap().len(), 11);
+    }
+
+    #[test]
+    fn unsupported_native_features_are_rejected_before_any_settings_write() {
+        for field in [
+            "startAtLogin",
+            "showNotifications",
+            "sessionQuotaNotificationsEnabled",
+            "limitResetNotificationsEnabled",
+            "credentialExpiryNotificationsEnabled",
+            "predictivePaceWarningEnabled",
+            "soundEnabled",
+            "stayAwakeEnabled",
+            "powertoysStatusPipeEnabled",
+        ] {
+            let patch: SettingsUpdate =
+                serde_json::from_value(serde_json::json!({field: true})).unwrap();
+            assert!(patch.validate_platform(false).is_err(), "{field}");
+            assert!(patch.validate_platform(true).is_ok(), "{field}");
+            let off: SettingsUpdate =
+                serde_json::from_value(serde_json::json!({field: false})).unwrap();
+            assert!(off.validate_platform(false).is_ok(), "{field}");
+        }
+        let automatic: SettingsUpdate =
+            serde_json::from_value(serde_json::json!({"lowPowerModePreference":"automatic"}))
+                .unwrap();
+        assert!(automatic.validate_platform(false).is_err());
+        for preference in ["on", "off"] {
+            let manual: SettingsUpdate =
+                serde_json::from_value(serde_json::json!({"lowPowerModePreference":preference}))
+                    .unwrap();
+            assert!(manual.validate_platform(false).is_ok());
+        }
     }
 
     #[test]

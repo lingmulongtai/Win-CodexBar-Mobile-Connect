@@ -1780,3 +1780,5 @@ QuotaArchiveTitle = 使用量履歴
 QuotaArchiveHelp = このPCに90日分を保存し、接続した端末と共有します。記録した値だけを表示し、古い記録は日ごとにまとめる場合があります。取得できなかった期間は補完しません。
 QuotaArchiveSevenDays = 7日
 QuotaArchiveThirtyDays = 30日
+
+NativeFeatureWindowsOnly = この機能は現在Windows版のみ対応しています。

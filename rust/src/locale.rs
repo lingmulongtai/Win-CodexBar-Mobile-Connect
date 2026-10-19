@@ -1059,6 +1059,7 @@ locale_keys! {
     ProviderServiceStatusHelp,
     LowPowerMode,
     LowPowerModeHelper,
+    NativeFeatureWindowsOnly,
     LowPowerModeOff,
     LowPowerModeOn,
     LowPowerModeAutomatic,

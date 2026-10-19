@@ -811,6 +811,7 @@ export const ALL_LOCALE_KEYS = [
   "ProviderServiceStatusHelp",
   "LowPowerMode",
   "LowPowerModeHelper",
+  "NativeFeatureWindowsOnly",
   "LowPowerModeOff",
   "LowPowerModeOn",
   "LowPowerModeAutomatic",

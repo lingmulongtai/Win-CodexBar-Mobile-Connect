@@ -238,6 +238,14 @@ export interface ProviderSummary {
 }
 
 export interface SettingsSnapshot {
+  platformCapabilities?: {
+    startAtLogin: boolean;
+    notifications: boolean;
+    sound: boolean;
+    stayAwake: boolean;
+    automaticLowPower: boolean;
+    powertoys: boolean;
+  };
   preferredCurrencyCode?: string;
   enabledProviders: string[];
   providerOrder?: string[];

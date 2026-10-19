@@ -344,11 +344,11 @@ export default function GeneralTab({
             onChange={(value) => set({ theme: value as ThemePreference })}
           />
         </Field>
-        <Field label={t("StartAtLogin")}>
+        <Field label={t("StartAtLogin")} description={settings.platformCapabilities?.startAtLogin === false ? t("NativeFeatureWindowsOnly") : undefined}>
           <Toggle
             variant="switch"
             checked={settings.startAtLogin}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.startAtLogin === false}
             onChange={(v) => set({ startAtLogin: v })}
           />
         </Field>
@@ -400,7 +400,7 @@ export default function GeneralTab({
             options={[
               { value: "off", label: t("LowPowerModeOff") },
               { value: "on", label: t("LowPowerModeOn") },
-              { value: "automatic", label: t("LowPowerModeAutomatic") },
+              { value: "automatic", label: t("LowPowerModeAutomatic"), disabled: settings.platformCapabilities?.automaticLowPower === false },
             ]}
             onChange={(v) => set({
               lowPowerModePreference: v as "off" | "on" | "automatic",
@@ -495,7 +495,7 @@ function NotificationsPane({
 
   return (
     <>
-      <SettingsGroup title={t("SectionAlerts")}>
+      <SettingsGroup title={t("SectionAlerts")} footer={settings.platformCapabilities?.notifications === false ? <p>{t("NativeFeatureWindowsOnly")}</p> : undefined}>
         <Field
           label={t("CredentialExpiryNotifications")}
           description={t("CredentialExpiryNotificationsHelper")}
@@ -504,7 +504,7 @@ function NotificationsPane({
             variant="switch"
             checked={settings.credentialExpiryNotificationsEnabled}
             ariaLabel={t("CredentialExpiryNotifications")}
-            disabled={saving || alertsMuted}
+            disabled={saving || alertsMuted || settings.platformCapabilities?.notifications === false}
             onChange={(v) => set({ credentialExpiryNotificationsEnabled: v })}
           />
         </Field>
@@ -518,7 +518,7 @@ function NotificationsPane({
               settings.sessionQuotaNotificationsEnabled ?? settings.showNotifications
             }
             ariaLabel={t("SessionQuotaNotifications")}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.notifications === false}
             onChange={(v) => set({ sessionQuotaNotificationsEnabled: v })}
           />
         </Field>
@@ -527,7 +527,7 @@ function NotificationsPane({
             variant="switch"
             checked={settings.showNotifications}
             ariaLabel={t("ShowNotifications")}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.notifications === false}
             onChange={(v) => set({ showNotifications: v })}
           />
         </Field>
@@ -539,7 +539,7 @@ function NotificationsPane({
             variant="switch"
             checked={settings.predictivePaceWarningEnabled}
             ariaLabel={t("PredictivePaceWarnings")}
-            disabled={saving || alertsMuted}
+            disabled={saving || alertsMuted || settings.platformCapabilities?.notifications === false}
             onChange={(v) => set({ predictivePaceWarningEnabled: v })}
           />
         </Field>
@@ -553,7 +553,7 @@ function NotificationsPane({
             variant="switch"
             checked={settings.limitResetNotificationsEnabled ?? false}
             ariaLabel={t("LimitResetNotifications")}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.notifications === false}
             onChange={(v) => set({ limitResetNotificationsEnabled: v })}
           />
         </Field>
@@ -585,16 +585,16 @@ function NotificationsPane({
       </SettingsGroup>
 
       <SettingsGroup>
-        <Field label={t("SoundEnabled")} description={t("SoundEnabledHelper")}>
+        <Field label={t("SoundEnabled")} description={t(settings.platformCapabilities?.sound === false ? "NativeFeatureWindowsOnly" : "SoundEnabledHelper")}>
           <Toggle
             variant="switch"
             checked={settings.soundEnabled}
             ariaLabel={t("SoundEnabled")}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.sound === false}
             onChange={(v) => set({ soundEnabled: v })}
           />
         </Field>
-        {settings.soundEnabled && (
+        {settings.soundEnabled && settings.platformCapabilities?.sound !== false && (
           <Field
             label={t("NotificationSoundTheme")}
             description={t("NotificationSoundThemeHelper")}
@@ -617,7 +617,7 @@ function NotificationsPane({
             />
           </Field>
         )}
-        {settings.soundEnabled &&
+        {settings.soundEnabled && settings.platformCapabilities?.sound !== false &&
           NOTIFICATION_SOUND_EVENTS.map((sound) => {
             const path = settings.notificationSoundPaths[sound.pathKey];
             const label = t(sound.labelKey);
