@@ -2,6 +2,9 @@
 #[cfg(target_os = "macos")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use codexbar::secure_file::{self, SecureFileStatus};
+    if cfg!(feature = "test-secure-storage") {
+        return Err("The native Keychain probe cannot use test-secure-storage".into());
+    }
     const SAMPLE: &str = "CodexBar native secure storage probe";
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 2 {

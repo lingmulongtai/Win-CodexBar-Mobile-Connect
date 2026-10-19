@@ -51,6 +51,7 @@ pub(super) fn decrypt(encrypted: &[u8], key: &[u8; 32]) -> io::Result<Vec<u8>> {
 
 // Kept separate from OS access so unit tests exercise the missing-key policy
 // without changing the user's Keychain or the global keyring backend.
+#[cfg(any(test, not(feature = "test-secure-storage")))]
 fn resolve_key(
     existing: Result<Vec<u8>, keyring::Error>,
     may_create: bool,
@@ -78,7 +79,7 @@ fn resolve_key(
     }
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(all(target_os = "macos", not(any(test, feature = "test-secure-storage"))))]
 fn entry() -> io::Result<keyring::Entry> {
     keyring::Entry::new(
         "com.lingmulongtai.codexbar.mac.secure-files",
@@ -87,7 +88,7 @@ fn entry() -> io::Result<keyring::Entry> {
     .map_err(|_| io::Error::other("macOS Keychain is unavailable"))
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(all(target_os = "macos", not(any(test, feature = "test-secure-storage"))))]
 pub(super) fn read_key() -> io::Result<[u8; 32]> {
     // Reading an existing encrypted file must also work when the config
     // directory is read-only. Only the write path initializes the store.
@@ -96,7 +97,7 @@ pub(super) fn read_key() -> io::Result<[u8; 32]> {
     })
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(all(target_os = "macos", not(any(test, feature = "test-secure-storage"))))]
 pub(super) fn master_key(may_create: bool) -> io::Result<[u8; 32]> {
     use std::{fs::OpenOptions, os::unix::fs::OpenOptionsExt, sync::Mutex};
     static KEY_LOCK: Mutex<()> = Mutex::new(());
@@ -127,15 +128,15 @@ pub(super) fn master_key(may_create: bool) -> io::Result<[u8; 32]> {
     Ok(key)
 }
 
-#[cfg(all(target_os = "macos", test))]
+#[cfg(all(target_os = "macos", any(test, feature = "test-secure-storage")))]
 pub(super) fn read_key() -> io::Result<[u8; 32]> {
     master_key(false)
 }
 
-#[cfg(all(target_os = "macos", test))]
+#[cfg(all(target_os = "macos", any(test, feature = "test-secure-storage")))]
 pub(super) fn master_key(_may_create: bool) -> io::Result<[u8; 32]> {
-    // Unit fixtures never use or modify a real user's credentials. The native
-    // integration probe builds the library normally and exercises Keychain.
+    // Includes dependent shell unit tests, where this library lacks cfg(test).
+    // Normal builds and the native integration probe still exercise Keychain.
     static KEY: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
     Ok(*KEY.get_or_init(|| {
         let mut key = [0_u8; 32];
