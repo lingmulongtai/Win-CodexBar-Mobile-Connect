@@ -2,11 +2,13 @@
 //! and raw provider responses are deliberately absent from this wire model.
 
 mod client;
+mod connections;
 mod control;
 mod history;
 mod protocol;
 mod server;
 pub use client::{PeerClientError, PeerEndpoint, fetch_peer_snapshot};
+pub use connections::{PeerConnection, PeerConnections};
 pub use history::{quota_history, record_history};
 
 pub use protocol::{Pairing, account_scope, account_subject, is_private_address};
