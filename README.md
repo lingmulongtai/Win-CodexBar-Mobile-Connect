@@ -63,7 +63,7 @@ History and spend use the selected PC’s saved observations, reporting period a
 
 [Mac app and desktop connection guide](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect) · [All three apps in one GitHub Project](https://github.com/users/lingmulongtai/projects/3)
 
-Native Windows v0.72.0 development build, isolated synthetic profiles; the images do not contain account data or connection keys.
+Downloaded public Windows v0.72.0 EXE, isolated synthetic profiles; the images do not contain account data or connection keys. Mutual receiving, UI source switching, offline retention and restart restoration were checked against the released binary.
 
 ![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.jpg)
 
