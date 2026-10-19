@@ -248,11 +248,35 @@ enum Reply {
     TooLarge,
 }
 
+// Check authorization only after waiting for the same lock used by retirement.
+// A refresh queued before disconnect must never recreate a retired WebView.
+async fn lock_current_profile(
+    id: Uuid,
+    current: impl FnOnce() -> (Option<Uuid>, Option<Uuid>),
+) -> Result<tokio::sync::MutexGuard<'static, ()>, ProviderError> {
+    let guard = FETCH.lock().await;
+    let (selected, pending) = current();
+    if selected != Some(id) && pending != Some(id) {
+        return Err(ProviderError::AuthRequired);
+    }
+    Ok(guard)
+}
+
 pub(crate) async fn fetch(
     app: &tauri::AppHandle,
     id: Uuid,
 ) -> Result<ProviderFetchResult, ProviderError> {
-    let _fetch = FETCH.lock().await;
+    let _fetch = lock_current_profile(id, || {
+        let selected = codexbar::settings::ManualCookies::load();
+        let selected = selection(selected.get("geminiapps"));
+        let pending = PENDING
+            .lock()
+            .ok()
+            .and_then(|pending| *pending)
+            .or_else(stored_pending);
+        (selected, pending)
+    })
+    .await?;
     let window = ensure_window(app, id, false).map_err(ProviderError::Other)?;
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
@@ -401,6 +425,7 @@ pub(super) fn complete(app: &tauri::AppHandle) {
 }
 
 pub(super) async fn retire(app: &tauri::AppHandle, id: Uuid) -> Result<(), String> {
+    let _fetch = FETCH.lock().await;
     if let Ok(mut blocked) = BLOCKED.lock() {
         blocked.remove(&id);
     }
@@ -508,20 +533,14 @@ pub(super) async fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
     let id = PENDING
         .lock()
         .map_err(|_| "Gemini connection is unavailable")?
+        .take()
         .or_else(stored_pending);
-    if let Some(id) = id {
-        if selection(codexbar::settings::ManualCookies::load().get("geminiapps")) == Some(id) {
-            *PENDING
-                .lock()
-                .map_err(|_| "Gemini connection is unavailable")? = None;
-            forget_pending()?;
-            return Ok(());
-        }
+    // Revoke both pending references before yielding to an in-flight fetch.
+    forget_pending()?;
+    if let Some(id) = id
+        && selection(codexbar::settings::ManualCookies::load().get("geminiapps")) != Some(id)
+    {
         retire(app, id).await?;
-        *PENDING
-            .lock()
-            .map_err(|_| "Gemini connection is unavailable")? = None;
-        forget_pending()?;
     }
     Ok(())
 }
@@ -529,6 +548,27 @@ pub(super) async fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn queued_fetch_rechecks_revocation_before_it_can_recreate_a_window() {
+        let id = Uuid::new_v4();
+        let guard = FETCH.lock().await;
+        let selected = std::sync::Arc::new(Mutex::new(Some(id)));
+        let queued_selected = selected.clone();
+        let queued = tokio::spawn(async move {
+            lock_current_profile(id, || (*queued_selected.lock().unwrap(), None))
+                .await
+                .is_err()
+        });
+        tokio::task::yield_now().await;
+        *selected.lock().unwrap() = None;
+        drop(guard);
+        assert!(queued.await.unwrap());
+        assert!(lock_current_profile(id, || (Some(id), None)).await.is_ok());
+        assert!(lock_current_profile(id, || (None, Some(id))).await.is_ok());
+        assert!(lock_current_profile(id, || (None, None)).await.is_err());
+    }
+
     #[test]
     fn only_an_uncommitted_pending_profile_can_resume() {
         let pending = Uuid::new_v4();
