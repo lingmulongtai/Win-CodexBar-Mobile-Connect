@@ -51,6 +51,12 @@ v0.71.0では、独立した「モバイル接続」タブ、PCに保存する�
 
 [Mac版・PC同士の接続ガイド](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect) · [3つのアプリをまとめたGitHub Project](https://github.com/users/lingmulongtai/projects/3)
 
+ネイティブWindows v0.72.0開発ビルドで、独立したデモ設定を使用しています。実アカウントや接続キーは含みません。
+
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.png)
+
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.png)
+
 ## スマホとの接続
 
 1. Windows側で使うサービスを接続・有効化します。

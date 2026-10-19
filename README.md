@@ -63,6 +63,12 @@ History and spend use the selected PC’s saved observations, reporting period a
 
 [Mac app and desktop connection guide](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect) · [All three apps in one GitHub Project](https://github.com/users/lingmulongtai/projects/3)
 
+Native Windows v0.72.0 development build, isolated synthetic profiles; the images do not contain account data or connection keys.
+
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.png)
+
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.png)
+
 ## Connect
 
 1. Connect and enable the desired providers on Windows.

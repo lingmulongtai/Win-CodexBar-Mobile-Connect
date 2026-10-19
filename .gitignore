@@ -142,3 +142,11 @@ tauri_test*.txt
 !/docs/releases/
 /docs/releases/*
 !/docs/releases/v0.72.0.md
+
+# Reviewed native desktop peer screenshots
+!/docs/images/
+/docs/images/*
+!/docs/images/mobile-connect/
+/docs/images/mobile-connect/*
+!/docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.png
+!/docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.png
