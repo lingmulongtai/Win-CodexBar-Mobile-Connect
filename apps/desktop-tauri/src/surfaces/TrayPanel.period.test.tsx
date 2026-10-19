@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getCachedProviders: vi.fn(),
+  getDesktopPeerStatus: vi.fn().mockResolvedValue({ selectedId: null, sourceId: "local", connections: [], receiving: false, connected: false, lastReceived: null, name: null, error: null, storageError: null }),
   refreshProviders: vi.fn(),
   refreshProvidersIfStale: vi.fn(),
   getSettingsSnapshot: vi.fn(),

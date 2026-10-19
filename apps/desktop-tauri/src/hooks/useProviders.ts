@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   ProviderUsageSnapshot,
+  DesktopPeerStatus,
   RefreshCompletePayload,
   RefreshStartedPayload,
 } from "../types/bridge";
 import {
   getCachedProviders,
+  getDesktopPeerStatus,
   refreshProviders,
   refreshProvidersIfStale,
 } from "../lib/tauri";
@@ -39,6 +41,7 @@ export interface UseProvidersOptions {
 }
 
 export interface UseProvidersResult {
+  peer: DesktopPeerStatus | null;
   /** Current provider snapshots (updated live as each provider completes). */
   providers: ProviderUsageSnapshot[];
   /** True while a refresh cycle is in progress. */
@@ -73,6 +76,8 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
     null,
   );
   const [hasLoadedCache, setHasLoadedCache] = useState(false);
+  const [peer, setPeer] = useState<DesktopPeerStatus | null>(null);
+  const sourceRef = useRef<string>("loading");
   const refreshingRef = useRef(false);
   const pendingSnapshotsRef = useRef<Map<string, ProviderUsageSnapshot>>(new Map());
   const flushTimerRef = useRef<number | undefined>(undefined);
@@ -120,35 +125,63 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
     refreshProviders().catch(() => {
       refreshingRef.current = false;
       setRefreshingProviderIds(new Set());
+    }).finally(() => {
+      if (sourceRef.current.startsWith("peer:")) refreshingRef.current = false;
     });
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    let sourceLoaded = false;
 
-    // Load existing cache first.
-    const initialEpoch = settingsReloadEpochRef.current;
-    getCachedProviders()
-      .then((cached) => {
-        if (
-          !cancelled &&
-          initialEpoch === settingsReloadEpochRef.current &&
-          cached.length > 0
-        ) {
-          mergeSnapshots(cached);
+    const receiveSource = (status: DesktopPeerStatus) => {
+      if (cancelled) return;
+      const changed = sourceRef.current !== status.sourceId;
+      sourceRef.current = status.sourceId;
+      setPeer(status);
+      if (changed) {
+        setProviders([]);
+        setLastRefresh(null);
+        refreshingRef.current = false;
+        setRefreshingProviderIds(new Set());
+      }
+      if (sourceLoaded && !changed && status.sourceId === "local") return;
+      sourceLoaded = true;
+      const epoch = ++settingsReloadEpochRef.current;
+      settingsReloadingRef.current = status.sourceId === "local";
+      pendingSnapshotsRef.current.clear();
+      if (flushTimerRef.current !== undefined) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = undefined;
+      }
+      void getCachedProviders().then((cached) => {
+        if (cancelled || epoch !== settingsReloadEpochRef.current) return;
+        const matches = cached.every((p) => status.sourceId === "local"
+          ? !p.sourceLabel.startsWith("peer:")
+          : p.sourceLabel.startsWith(`${status.sourceId}|`));
+        if (matches) {
+          if (status.sourceId === "local") mergeSnapshots(cached);
+          else setProviders(cached.map(p => ({ ...p, peerReceivedAt: status.lastReceived })));
         }
-      })
-      .finally(() => {
-        if (!cancelled) {
+      }).catch(() => {}).finally(() => {
+        if (!cancelled && epoch === settingsReloadEpochRef.current) {
           setHasLoadedCache(true);
+          settingsReloadingRef.current = false;
+          if (status.sourceId === "local") flushPendingSnapshots();
         }
       });
+    };
+    const sourceEpoch = settingsReloadEpochRef.current;
+    void getDesktopPeerStatus().then((status) => {
+      if (sourceEpoch === settingsReloadEpochRef.current) receiveSource(status);
+    }).catch(() => { if (!cancelled) setHasLoadedCache(true); });
+    const unlistenPeer = listen<DesktopPeerStatus>("desktop-peer-changed", event => receiveSource(event.payload));
 
     // Event listeners.
     const unlistenUpdated = listen<ProviderUsageSnapshot>(
       "provider-updated",
       (event) => {
-        if (!cancelled) {
+        if (!cancelled && sourceRef.current === "local") {
           queueSnapshot(event.payload);
           setRefreshingProviderIds(
             (current) =>
@@ -161,6 +194,10 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
     );
 
     const unlistenSettings = listen("settings-changed", () => {
+      if (sourceRef.current !== "local") {
+        void getDesktopPeerStatus().then(receiveSource).catch(() => {});
+        return;
+      }
       const epoch = ++settingsReloadEpochRef.current;
       settingsReloadingRef.current = true;
       if (flushTimerRef.current !== undefined) {
@@ -183,7 +220,7 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
     });
 
     const unlistenStarted = listen<RefreshStartedPayload>("refresh-started", (event) => {
-      if (!cancelled) {
+      if (!cancelled && sourceRef.current === "local") {
         refreshingRef.current = true;
         setRefreshingProviderIds(new Set(event.payload.providerIds));
       }
@@ -192,7 +229,7 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
     const unlistenComplete = listen<RefreshCompletePayload>(
       "refresh-complete",
       (event) => {
-        if (!cancelled) {
+        if (!cancelled && sourceRef.current === "local") {
           if (!settingsReloadingRef.current) flushPendingSnapshots();
           refreshingRef.current = false;
           setRefreshingProviderIds(new Set());
@@ -242,6 +279,7 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
       }
       pendingSnapshotsRef.current.clear();
       unlistenUpdated.then((fn) => fn());
+      unlistenPeer.then((fn) => fn());
       unlistenSettings.then((fn) => fn());
       unlistenStarted.then((fn) => fn());
       unlistenComplete.then((fn) => fn());
@@ -307,9 +345,11 @@ export function useProviders(options: UseProvidersOptions = {}): UseProvidersRes
   }, [providers, refresh]);
 
   return {
+    peer,
     providers,
-    isRefreshing: refreshingProviderIds.size > 0,
-    refreshingProviderIds,
+    isRefreshing: peer?.selectedId ? peer.receiving : refreshingProviderIds.size > 0,
+    refreshingProviderIds: peer?.selectedId
+      ? new Set(peer.receiving ? providers.map(p => p.providerId) : []) : refreshingProviderIds,
     refresh,
     lastRefresh,
     hasCachedData: providers.length > 0,

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getCachedProviders: vi.fn(),
+  getDesktopPeerStatus: vi.fn(),
   refreshProviders: vi.fn(),
   refreshProvidersIfStale: vi.fn(),
 }));
@@ -80,6 +81,7 @@ describe("useProviders", () => {
     vi.clearAllMocks();
     eventMocks.listeners.clear();
     tauriMocks.getCachedProviders.mockResolvedValue([]);
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue({ selectedId: null, sourceId: "local", name: null, connections: [], receiving: false, lastReceived: null, connected: false, error: null, storageError: null });
     tauriMocks.refreshProviders.mockResolvedValue(undefined);
     tauriMocks.refreshProvidersIfStale.mockResolvedValue(undefined);
     eventMocks.listen.mockImplementation(
@@ -99,6 +101,38 @@ describe("useProviders", () => {
       expect(tauriMocks.refreshProvidersIfStale).toHaveBeenCalledTimes(1);
     });
     expect(tauriMocks.refreshProviders).not.toHaveBeenCalled();
+  });
+
+  it("replaces peer lists, ignores local refreshes and clears removed providers", async () => {
+    const peer = { selectedId: "home", sourceId: "peer:home:1", name: "Home", receiving: false };
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue(peer);
+    tauriMocks.getCachedProviders.mockResolvedValue([{ ...provider("codex", 42), sourceLabel: "peer:home:1|a" }]);
+    const { result } = renderHook(() => useProviders({ refreshOnMount: false }));
+    await waitFor(() => expect(result.current.providers[0]?.primary.usedPercent).toBe(42));
+    act(() => {
+      emitProviderEvent("provider-updated", provider("local-only", 99));
+      emitProviderEvent("refresh-started", { providerIds: ["local-only"] });
+      emitProviderEvent("refresh-complete", { providerCount: 1, errorCount: 0 });
+    });
+    expect(result.current.providers.map(p => p.providerId)).toEqual(["codex"]);
+    expect(result.current.isRefreshing).toBe(false);
+    tauriMocks.getCachedProviders.mockResolvedValue([]);
+    act(() => emitProviderEvent("desktop-peer-changed", peer));
+    await waitFor(() => expect(result.current.providers).toEqual([]));
+  });
+
+  it("discards a delayed peer read after switching PCs with the same provider and timestamp", async () => {
+    let finish!: (providers: ProviderUsageSnapshot[]) => void;
+    const first = { selectedId: "home", sourceId: "peer:home:1", name: "Home", receiving: false };
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue(first);
+    tauriMocks.getCachedProviders.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const { result } = renderHook(() => useProviders({ refreshOnMount: false }));
+    await waitFor(() => expect(tauriMocks.getCachedProviders).toHaveBeenCalledTimes(1));
+    tauriMocks.getCachedProviders.mockResolvedValue([{ ...provider("codex", 80), sourceLabel: "peer:work:2|a" }]);
+    act(() => emitProviderEvent("desktop-peer-changed", { ...first, selectedId: "work", sourceId: "peer:work:2" }));
+    await waitFor(() => expect(result.current.providers[0]?.primary.usedPercent).toBe(80));
+    await act(async () => finish([{ ...provider("codex", 20), sourceLabel: "peer:home:1|a" }]));
+    expect(result.current.providers[0]?.primary.usedPercent).toBe(80);
   });
 
   it("can defer the stale-aware refresh on mount", async () => {
@@ -351,6 +385,7 @@ describe("useProviders", () => {
     vi.useFakeTimers();
     try {
       const { result } = renderHook(() => useProviders());
+      await act(async () => {});
 
       act(() => {
         emitProviderEvent("provider-updated", provider("codex", 10));
