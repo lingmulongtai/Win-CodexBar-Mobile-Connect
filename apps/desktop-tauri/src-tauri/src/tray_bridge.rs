@@ -134,7 +134,11 @@ fn build_native_tray_menu(
         },
         settings.ui_language,
     );
-    crate::tray_accounts::prepend_account_menus(&mut spec, &settings);
+    if crate::desktop_peer::view(app).is_some() {
+        spec.retain(|entry| entry.id.as_deref() != Some("providers"));
+    } else {
+        crate::tray_accounts::prepend_account_menus(&mut spec, &settings);
+    }
     let entries = spec
         .iter()
         .map(|entry| build_native_menu_entry(app, entry))
@@ -334,88 +338,78 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-/// Rebuild the native tray menu from current provider + settings state.
+/// All native publications resolve their source on the UI thread. Peer selection
+/// commands are synchronous Tauri commands on that same thread. A queued local
+/// refresh therefore cannot publish a captured local/old-peer snapshot after a
+/// switch, and no state lock is held across native menu/icon operations.
 pub(crate) fn rebuild_tray_menu(app: &AppHandle) {
-    let catalog = crate::commands::get_provider_catalog();
-    let settings = Settings::load();
-    let rates_cache = app
-        .try_state::<crate::commands::CurrencyRateCache>()
-        .map(|state| state.inner());
-    let status_labels = if let Some(st) = app.try_state::<Mutex<AppState>>() {
-        let guard = st.lock().unwrap();
-        TrayPresentationPlan::resolve(&settings, &guard.provider_cache, rates_cache)
-            .status_labels(settings.ui_language)
-    } else {
-        vec![]
-    };
-    if let Ok(menu) = build_native_tray_menu(app, &catalog, &status_labels)
-        && let Some(tray) = app.tray_by_id("codexbar-main")
-    {
-        let _ = tray.set_menu(Some(menu));
-    }
+    queue_presentation(app, true, false);
 }
 
-/// Rebuild the tray menu with current provider status labels after a refresh cycle.
 pub fn update_tray_status_items(
     app: &AppHandle,
-    snapshots: &[crate::commands::ProviderUsageSnapshot],
+    _snapshots: &[crate::commands::ProviderUsageSnapshot],
 ) {
-    let catalog = crate::commands::get_provider_catalog();
-    let settings = Settings::load();
-    let rates_cache = app
-        .try_state::<crate::commands::CurrencyRateCache>()
-        .map(|state| state.inner());
-    let status_labels = TrayPresentationPlan::resolve(&settings, snapshots, rates_cache)
-        .status_labels(settings.ui_language);
-
-    if let Ok(menu) = build_native_tray_menu(app, &catalog, &status_labels)
-        && let Some(tray) = app.tray_by_id("codexbar-main")
-    {
-        let _ = tray.set_menu(Some(menu));
-    }
+    queue_presentation(app, true, false);
 }
 
-/// Refresh every native tray surface that depends on settings and cached provider data.
 pub(crate) fn refresh_tray_presentation(app: &AppHandle) {
-    let snapshots = app
-        .try_state::<Mutex<AppState>>()
-        .map(|st| st.lock().unwrap().provider_cache.clone())
-        .unwrap_or_default();
-    update_tray_status_items(app, &snapshots);
-    update_tray_icon_and_tooltip(app, &snapshots);
+    queue_presentation(app, true, true);
 }
 
-/// Update the tray icon pixels and tooltip text to reflect current provider usage.
-///
-/// Behaviour mirrors egui's `choose_tray_update_plan` (rust/src/native_ui/app.rs):
-/// - If `menu_bar_shows_highest_usage` is on (legacy Display mode "minimal" is
-///   folded into it on load), render the bar from the healthy provider with the highest session usage.
-/// - Otherwise render from the first enabled healthy provider (catalog order).
-/// - When any provider exposes a weekly/secondary window, the icon shows both
-///   bars from the same picked provider.
-/// - With zero healthy providers but at least one error, fall back to an
-///   error-styled icon using the last known max percentage so the tray
-///   still communicates "something is wrong".
 pub fn update_tray_icon_and_tooltip(
     app: &AppHandle,
-    snapshots: &[crate::commands::ProviderUsageSnapshot],
+    _snapshots: &[crate::commands::ProviderUsageSnapshot],
 ) {
-    let Some(tray) = app.tray_by_id("codexbar-main") else {
-        return;
-    };
+    queue_presentation(app, false, true);
+}
 
-    let settings = Settings::load();
-    let rates_cache = app
-        .try_state::<crate::commands::CurrencyRateCache>()
-        .map(|state| state.inner());
-    let plan = TrayPresentationPlan::resolve(&settings, snapshots, rates_cache);
-    let (rgba, w, h) = plan.render_icon();
-    let icon = Image::new_owned(rgba, w, h);
-    let _ = tray.set_icon(Some(icon));
-
-    let tooltip = build_tooltip(snapshots, settings.ui_language, settings.hide_personal_info);
-    let tooltip = crate::status_poller::with_incident_lines(app, &settings, tooltip);
-    let _ = tray.set_tooltip(Some(tooltip));
+fn queue_presentation(app: &AppHandle, menu: bool, icon: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let app = &handle;
+        let peer = crate::desktop_peer::view(app);
+        let snapshots = peer
+            .as_ref()
+            .map(|view| view.providers())
+            .unwrap_or_else(|| {
+                app.try_state::<Mutex<AppState>>()
+                    .and_then(|state| state.lock().ok().map(|state| state.provider_cache.clone()))
+                    .unwrap_or_default()
+            });
+        let mut settings = Settings::load();
+        if peer.is_some() {
+            settings.enabled_providers = snapshots.iter().map(|s| s.provider_id.clone()).collect();
+        }
+        let rates_cache = app
+            .try_state::<crate::commands::CurrencyRateCache>()
+            .map(|state| state.inner());
+        let plan = TrayPresentationPlan::resolve(&settings, &snapshots, rates_cache);
+        if menu {
+            let labels = plan.status_labels(settings.ui_language);
+            if let Ok(menu) =
+                build_native_tray_menu(app, &crate::commands::get_provider_catalog(), &labels)
+                && let Some(tray) = app.tray_by_id("codexbar-main")
+            {
+                let _ = tray.set_menu(Some(menu));
+            }
+        }
+        if icon && let Some(tray) = app.tray_by_id("codexbar-main") {
+            let (rgba, w, h) = plan.render_icon();
+            let _ = tray.set_icon(Some(Image::new_owned(rgba, w, h)));
+            let tooltip = build_tooltip(
+                &snapshots,
+                settings.ui_language,
+                settings.hide_personal_info,
+            );
+            let tooltip = peer.as_ref().map_or_else(
+                || tooltip.clone(),
+                |view| format!("{}\n{tooltip}", view.name),
+            );
+            let tooltip = crate::status_poller::with_incident_lines(app, &settings, tooltip);
+            let _ = tray.set_tooltip(Some(tooltip));
+        }
+    });
 }
 
 /// Build a compact multi-line tooltip string from provider snapshots.

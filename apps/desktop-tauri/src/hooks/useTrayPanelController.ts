@@ -55,6 +55,7 @@ export function useTrayPanelController(state: BootstrapState) {
     refresh,
     hasCachedData,
     hasLoadedCache,
+    peer,
   } = useProviders({
     initialRefreshDelayMs: TRAY_INITIAL_REFRESH_DELAY_MS,
     forceRefreshOnMount: settings.refreshAllProvidersOnMenuOpen,
@@ -105,20 +106,20 @@ export function useTrayPanelController(state: BootstrapState) {
       orderProviderSnapshots(
         providers,
         state.providers,
-        settings.enabledProviders,
+        peer?.selectedId ? providers.map(p => p.providerId) : settings.enabledProviders,
         settings.providerOrder,
       ),
-    [providers, settings.enabledProviders, settings.providerOrder, state.providers],
+    [providers, peer?.selectedId, settings.enabledProviders, settings.providerOrder, state.providers],
   );
   const denseProviderSlots = useMemo(
     () =>
       orderedEnabledProviderSlots(
         state.providers,
-        settings.enabledProviders,
+        peer?.selectedId ? providers.map(p => p.providerId) : settings.enabledProviders,
         sorted,
         settings.providerOrder,
       ),
-    [settings.enabledProviders, settings.providerOrder, sorted, state.providers],
+    [peer?.selectedId, providers, settings.enabledProviders, settings.providerOrder, sorted, state.providers],
   );
   const providersById = useMemo(
     () => new Map(sorted.map((provider) => [provider.providerId, provider])),
@@ -229,7 +230,7 @@ export function useTrayPanelController(state: BootstrapState) {
   }, []);
 
   const actionRows: MenuFooterRow[] = [];
-  const accountAction = accountMenuAction(actionProvider);
+  const accountAction = peer?.selectedId ? null : accountMenuAction(actionProvider);
   if (accountAction !== null) {
     const { settingsTab } = accountAction;
     actionRows.push({
@@ -374,6 +375,7 @@ export function useTrayPanelController(state: BootstrapState) {
   const revealClassName = `tray-panel-reveal${layoutReady ? " tray-panel-reveal--ready" : ""}`;
 
   return {
+    peer,
     t,
     settings,
     isRefreshing,

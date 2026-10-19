@@ -9,10 +9,17 @@ use codexbar::spend_contract::{SpendContract, build_contract_from_period_summary
 /// without a valid one the saved `cost_reporting_period` applies.
 #[tauri::command]
 pub async fn get_spend_contract(
+    app: tauri::AppHandle,
     provider_id: String,
     period: Option<String>,
     include_open_codex: Option<bool>,
 ) -> Result<SpendContract, String> {
+    if let Some(summary) = crate::desktop_peer::spend(&app) {
+        return Ok(SpendContract::empty(
+            &provider_id,
+            CostReportingPeriod::parse(&summary.reporting_period).unwrap_or_default(),
+        ));
+    }
     let provider = provider_id.trim().to_ascii_lowercase();
     if !matches!(provider.as_str(), "codex" | "claude" | "pi" | "opencodego") {
         return Err(format!(

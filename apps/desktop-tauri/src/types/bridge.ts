@@ -62,6 +62,18 @@ export type Language =
   | "turkish"
   | "ukrainian";
 
+export interface DesktopPeerStatus {
+  selectedId: string | null;
+  sourceId: string;
+  name: string | null;
+  connections: { id: string; name: string; address: string }[];
+  receiving: boolean;
+  lastReceived: number | null;
+  connected: boolean;
+  error: string | null;
+  storageError: string | null;
+}
+
 export interface MobileSharingStatus {
   allowRemoteSettings: boolean;
   enabled: boolean;
@@ -226,6 +238,14 @@ export interface ProviderSummary {
 }
 
 export interface SettingsSnapshot {
+  platformCapabilities?: {
+    startAtLogin: boolean;
+    notifications: boolean;
+    sound: boolean;
+    stayAwake: boolean;
+    automaticLowPower: boolean;
+    powertoys: boolean;
+  };
   preferredCurrencyCode?: string;
   enabledProviders: string[];
   providerOrder?: string[];
@@ -1009,6 +1029,8 @@ export type ProviderStateKind =
   | "unknown";
 
 export interface ProviderUsageSnapshot {
+  /** Added by the receiving hook, independent of the sender's quota timestamp. */
+  peerReceivedAt?: number | null;
   providerId: string;
   displayName: string;
   primary: RateWindowSnapshot;
@@ -1272,6 +1294,8 @@ export interface DetectedBrowserBridge {
 }
 
 export interface AppInfoBridge {
+  repositoryUrl?: string;
+  supportsAutomaticUpdates?: boolean;
   name: string;
   version: string;
   buildNumber: string;

@@ -90,6 +90,21 @@ pub(super) struct Request {
 }
 
 impl Request {
+    pub(super) fn signed(pairing: &Pairing, now: i64) -> Option<Self> {
+        let mut nonce = [0_u8; 16];
+        OsRng.fill_bytes(&mut nonce);
+        let nonce = URL_SAFE_NO_PAD.encode(nonce);
+        let canonical = format!("1\n{}\n{now}\n{nonce}\n{RESOURCE}", pairing.companion_id);
+        let key = hmac_sha256(&pairing.master_key()?, AUTH_CONTEXT);
+        Some(Self {
+            protocol_version: 1,
+            companion_id: pairing.companion_id.clone(),
+            requested_at_epoch_seconds: now,
+            nonce,
+            signature: URL_SAFE_NO_PAD.encode(hmac_sha256(&key, canonical.as_bytes())),
+        })
+    }
+
     pub(super) fn authenticate(&self, pairing: &Pairing, now: i64) -> bool {
         if self.protocol_version != 1
             || self.companion_id != pairing.companion_id
@@ -156,6 +171,39 @@ pub(super) fn encrypt(
         iv: URL_SAFE_NO_PAD.encode(iv),
         ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
     })
+}
+
+pub(super) fn decrypt(
+    pairing: &Pairing,
+    request: &Request,
+    envelope: &Envelope,
+    now: i64,
+) -> Option<Vec<u8>> {
+    if envelope.protocol_version != 1
+        || envelope.companion_id != pairing.companion_id
+        || envelope.request_nonce != request.nonce
+        || envelope.sent_at_epoch_seconds.abs_diff(now) > 120
+    {
+        return None;
+    }
+    let key = hmac_sha256(&pairing.master_key()?, ENCRYPTION_CONTEXT);
+    let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
+    let iv: [u8; 12] = URL_SAFE_NO_PAD.decode(&envelope.iv).ok()?.try_into().ok()?;
+    let ciphertext = URL_SAFE_NO_PAD.decode(&envelope.ciphertext).ok()?;
+    let aad = format!(
+        "1\n{}\n{}\n{}\n{RESOURCE}",
+        pairing.companion_id, request.nonce, envelope.sent_at_epoch_seconds
+    );
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&iv),
+            Payload {
+                msg: &ciphertext,
+                aad: aad.as_bytes(),
+            },
+        )
+        .ok()?;
+    (plaintext.len() <= 128 * 1024).then_some(plaintext)
 }
 
 // RFC 2104 HMAC using the existing SHA-256 dependency. Keys longer than the

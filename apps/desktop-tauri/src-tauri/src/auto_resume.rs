@@ -190,6 +190,9 @@ pub(crate) fn supports_auto_resume(provider: ProviderId) -> bool {
 /// list. Treat an unreadable account store as unavailable so the watcher fails
 /// closed.
 pub(crate) fn is_auto_resume_available(provider: ProviderId) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
     let unmanaged = TokenAccountStore::new()
         .load_provider(provider)
         .map(|data| data.active_account().is_none())

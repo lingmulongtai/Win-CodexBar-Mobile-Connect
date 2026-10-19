@@ -106,6 +106,7 @@ fn default_app_route(url: &tauri::Url) -> bool {
 }
 
 fn ensure_window(app: &tauri::AppHandle, id: Uuid, visible: bool) -> Result<WebviewWindow, String> {
+    #[cfg(windows)]
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some_and(|value| !value.is_empty()) {
         return Err("Gemini requires its own browser profile. Remove the WEBVIEW2_USER_DATA_FOLDER override before connecting.".into());
     }
@@ -120,53 +121,66 @@ fn ensure_window(app: &tauri::AppHandle, id: Uuid, visible: bool) -> Result<Webv
         .join("gemini-browser")
         .join(id.to_string());
     let popup_app = app.clone();
-    let window = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         label(id),
         WebviewUrl::External("https://gemini.google.com/app".parse().unwrap()),
     )
-    .title("Gemini — Win-CodexBar")
-    .inner_size(1024.0, 760.0)
-    .data_directory(directory)
-    .visible(visible)
-    .focused(false)
-    .on_navigation(move |url| {
-        if receive(id, url) {
-            return false;
-        }
-        let allowed = allowed_navigation(url);
-        if !allowed {
-            // Never log paths, query strings, fragments or the authentication URL.
-            let host = url.host_str().unwrap_or("unknown").to_string();
-            tracing::warn!(host, "Gemini sign-in navigation blocked");
-            if let Ok(mut blocked) = BLOCKED.lock() {
-                blocked.insert(id, host);
+    .title(format!(
+        "Gemini — {}",
+        app.config().product_name.as_deref().unwrap_or("CodexBar")
+    ))
+    .inner_size(1024.0, 760.0);
+    // WKWebView ignores data_directory. Each sign-in needs its own persistent
+    // macOS 14+ website data store, including device-bound session credentials.
+    #[cfg(target_os = "macos")]
+    let builder = {
+        std::fs::create_dir_all(&directory)
+            .map_err(|_| "Could not create Gemini profile reference")?;
+        builder.data_store_identifier(*id.as_bytes())
+    };
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.data_directory(directory);
+    let window = builder
+        .visible(visible)
+        .focused(false)
+        .on_navigation(move |url| {
+            if receive(id, url) {
+                return false;
             }
-        }
-        allowed
-    })
-    .on_new_window(move |url, _| {
-        // A user-initiated Google sign-in popup stays inside this isolated profile.
-        if allowed_navigation(&url)
-            && let Some(window) = popup_app.get_webview_window(&label(id))
-        {
-            let _ = window.navigate(url);
-        }
-        tauri::webview::NewWindowResponse::Deny
-    })
-    .on_page_load(move |_, payload| {
-        if let Ok(mut ready) = READY.lock() {
-            if payload.event() == tauri::webview::PageLoadEvent::Finished
-                && default_app_route(payload.url())
+            let allowed = allowed_navigation(url);
+            if !allowed {
+                // Never log paths, query strings, fragments or the authentication URL.
+                let host = url.host_str().unwrap_or("unknown").to_string();
+                tracing::warn!(host, "Gemini sign-in navigation blocked");
+                if let Ok(mut blocked) = BLOCKED.lock() {
+                    blocked.insert(id, host);
+                }
+            }
+            allowed
+        })
+        .on_new_window(move |url, _| {
+            // A user-initiated Google sign-in popup stays inside this isolated profile.
+            if allowed_navigation(&url)
+                && let Some(window) = popup_app.get_webview_window(&label(id))
             {
-                ready.insert(id);
-            } else {
-                ready.remove(&id);
+                let _ = window.navigate(url);
             }
-        }
-    })
-    .build()
-    .map_err(|_| "Could not open the Gemini browser")?;
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .on_page_load(move |_, payload| {
+            if let Ok(mut ready) = READY.lock() {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished
+                    && default_app_route(payload.url())
+                {
+                    ready.insert(id);
+                } else {
+                    ready.remove(&id);
+                }
+            }
+        })
+        .build()
+        .map_err(|_| "Could not open the Gemini browser")?;
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -234,11 +248,35 @@ enum Reply {
     TooLarge,
 }
 
+// Check authorization only after waiting for the same lock used by retirement.
+// A refresh queued before disconnect must never recreate a retired WebView.
+async fn lock_current_profile(
+    id: Uuid,
+    current: impl FnOnce() -> (Option<Uuid>, Option<Uuid>),
+) -> Result<tokio::sync::MutexGuard<'static, ()>, ProviderError> {
+    let guard = FETCH.lock().await;
+    let (selected, pending) = current();
+    if selected != Some(id) && pending != Some(id) {
+        return Err(ProviderError::AuthRequired);
+    }
+    Ok(guard)
+}
+
 pub(crate) async fn fetch(
     app: &tauri::AppHandle,
     id: Uuid,
 ) -> Result<ProviderFetchResult, ProviderError> {
-    let _fetch = FETCH.lock().await;
+    let _fetch = lock_current_profile(id, || {
+        let selected = codexbar::settings::ManualCookies::load();
+        let selected = selection(selected.get("geminiapps"));
+        let pending = PENDING
+            .lock()
+            .ok()
+            .and_then(|pending| *pending)
+            .or_else(stored_pending);
+        (selected, pending)
+    })
+    .await?;
     let window = ensure_window(app, id, false).map_err(ProviderError::Other)?;
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
@@ -386,7 +424,8 @@ pub(super) fn complete(app: &tauri::AppHandle) {
     }
 }
 
-pub(super) fn retire(app: &tauri::AppHandle, id: Uuid) -> Result<(), String> {
+pub(super) async fn retire(app: &tauri::AppHandle, id: Uuid) -> Result<(), String> {
+    let _fetch = FETCH.lock().await;
     if let Ok(mut blocked) = BLOCKED.lock() {
         blocked.remove(&id);
     }
@@ -402,6 +441,30 @@ pub(super) fn retire(app: &tauri::AppHandle, id: Uuid) -> Result<(), String> {
     let root = codexbar::settings::config_store_dir()
         .ok_or("Gemini browser storage is unavailable")?
         .join("gemini-browser");
+    #[cfg(target_os = "macos")]
+    {
+        let mut removed = !app
+            .fetch_data_store_identifiers()
+            .await
+            .map_err(|_| "Could not inspect Gemini website data stores")?
+            .contains(id.as_bytes());
+        for _ in 0..30 {
+            if removed {
+                break;
+            }
+            if app.remove_data_store(*id.as_bytes()).await.is_ok() {
+                removed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Preserve the UUID reference for a subsequent disconnect/cleanup retry.
+        if !removed {
+            return Err(
+                "Could not clear the Gemini website data store. Disconnect again to retry.".into(),
+            );
+        }
+    }
     remove_profile(&root, id)
 }
 
@@ -434,7 +497,7 @@ fn remove_profile(root: &std::path::Path, id: Uuid) -> Result<(), String> {
     Err("Gemini was disconnected, but its browser data is still busy. Disconnect again to retry cleanup.".into())
 }
 
-pub(super) fn clear(app: &tauri::AppHandle) -> Result<(), String> {
+pub(super) async fn clear(app: &tauri::AppHandle) -> Result<(), String> {
     let selected = codexbar::settings::ManualCookies::load();
     let selected = selection(selected.get("geminiapps"));
     let pending = PENDING
@@ -459,26 +522,25 @@ pub(super) fn clear(app: &tauri::AppHandle) -> Result<(), String> {
     }
     let mut result = Ok(());
     for id in profiles {
-        if let Err(error) = retire(app, id) {
+        if let Err(error) = retire(app, id).await {
             result = Err(error);
         }
     }
     result
 }
 
-pub(super) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
-    let mut pending = PENDING
+pub(super) async fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
+    let id = PENDING
         .lock()
-        .map_err(|_| "Gemini connection is unavailable")?;
-    if let Some(id) = (*pending).or_else(stored_pending) {
-        if selection(codexbar::settings::ManualCookies::load().get("geminiapps")) == Some(id) {
-            *pending = None;
-            forget_pending()?;
-            return Ok(());
-        }
-        retire(app, id)?;
-        *pending = None;
-        forget_pending()?;
+        .map_err(|_| "Gemini connection is unavailable")?
+        .take()
+        .or_else(stored_pending);
+    // Revoke both pending references before yielding to an in-flight fetch.
+    forget_pending()?;
+    if let Some(id) = id
+        && selection(codexbar::settings::ManualCookies::load().get("geminiapps")) != Some(id)
+    {
+        retire(app, id).await?;
     }
     Ok(())
 }
@@ -486,6 +548,27 @@ pub(super) fn cancel(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn queued_fetch_rechecks_revocation_before_it_can_recreate_a_window() {
+        let id = Uuid::new_v4();
+        let guard = FETCH.lock().await;
+        let selected = std::sync::Arc::new(Mutex::new(Some(id)));
+        let queued_selected = selected.clone();
+        let queued = tokio::spawn(async move {
+            lock_current_profile(id, || (*queued_selected.lock().unwrap(), None))
+                .await
+                .is_err()
+        });
+        tokio::task::yield_now().await;
+        *selected.lock().unwrap() = None;
+        drop(guard);
+        assert!(queued.await.unwrap());
+        assert!(lock_current_profile(id, || (Some(id), None)).await.is_ok());
+        assert!(lock_current_profile(id, || (None, Some(id))).await.is_ok());
+        assert!(lock_current_profile(id, || (None, None)).await.is_err());
+    }
+
     #[test]
     fn only_an_uncommitted_pending_profile_can_resume() {
         let pending = Uuid::new_v4();

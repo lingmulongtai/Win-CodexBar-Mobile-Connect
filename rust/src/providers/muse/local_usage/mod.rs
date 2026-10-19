@@ -165,23 +165,6 @@ fn day_window(days: u32) -> (String, String) {
     )
 }
 
-#[cfg(windows)]
-#[cfg(unix)]
-fn platform_file_identity(_path: &Path, metadata: &fs::Metadata) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-
-    Some(format!("{}:{}", metadata.dev(), metadata.ino()))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn platform_file_identity(_path: &Path, metadata: &fs::Metadata) -> Option<String> {
-    metadata
-        .created()
-        .ok()
-        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-        .map(|value| value.as_nanos().to_string())
-}
-
 fn discover(root: &Path, state: &mut ScanState) -> (Vec<PathBuf>, bool) {
     let mut files = Vec::new();
     let mut complete = true;

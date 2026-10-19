@@ -7,7 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch;
 
-const GITHUB_REPO: &str = "lingmulongtai/Win-CodexBar-Mobile-Connect";
+#[cfg(not(target_os = "macos"))]
+pub const GITHUB_REPO: &str = "lingmulongtai/Win-CodexBar-Mobile-Connect";
+#[cfg(target_os = "macos")]
+pub const GITHUB_REPO: &str = "lingmulongtai/CodexBar-Mac-Mobile-Connect";
+
+pub const fn supports_automatic_updates() -> bool {
+    cfg!(windows)
+}
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// State of the update download process
@@ -52,11 +59,11 @@ pub struct UpdateInfo {
 
 impl UpdateInfo {
     pub fn supports_auto_apply(&self) -> bool {
-        self.delivery == UpdateDelivery::Installer
+        supports_automatic_updates() && self.delivery == UpdateDelivery::Installer
     }
 
     pub fn supports_auto_download(&self) -> bool {
-        self.delivery == UpdateDelivery::Installer && self.expected_sha256.is_some()
+        self.supports_auto_apply() && self.expected_sha256.is_some()
     }
 }
 
@@ -159,10 +166,17 @@ fn remote_version_from_tag(tag_name: &str) -> &str {
 }
 
 fn select_release_target(release: &GitHubRelease) -> Option<UpdateInfo> {
+    select_release_target_for(release, supports_automatic_updates())
+}
+
+fn select_release_target_for(
+    release: &GitHubRelease,
+    windows_installer: bool,
+) -> Option<UpdateInfo> {
     let installer = release
         .assets
         .iter()
-        .find(|a| is_installer_asset_name(&a.name));
+        .find(|a| windows_installer && is_installer_asset_name(&a.name));
 
     let (download_url, delivery, expected_sha256) = if let Some(asset) = installer {
         (
@@ -482,6 +496,12 @@ pub fn start_background_download(
 /// 2. Exit the current application
 ///
 /// The installer should handle upgrading the application while it's closed.
+#[cfg(not(windows))]
+pub fn apply_update(_installer_path: &PathBuf) -> Result<(), String> {
+    Err("Open the release page to download and install the Mac application manually".into())
+}
+
+#[cfg(windows)]
 pub fn apply_update(installer_path: &PathBuf) -> Result<(), String> {
     // Verify the file exists
     if !installer_path.exists() {
@@ -507,15 +527,6 @@ pub fn apply_update(installer_path: &PathBuf) -> Result<(), String> {
                 .map_err(|e| format!("Failed to determine current executable for restart: {e}"))?,
         ),
     )?;
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::process::Command;
-
-        Command::new(installer_path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch installer: {}", e))?;
-    }
 
     // Exit the application to allow the installer to proceed
     std::process::exit(0);
@@ -715,6 +726,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn update_urls_use_the_owned_platform_repository() {
+        assert_eq!(
+            release_url(UpdateChannel::Stable),
+            format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest")
+        );
+        assert_eq!(
+            release_url(UpdateChannel::Beta),
+            format!("https://api.github.com/repos/{GITHUB_REPO}/releases")
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(GITHUB_REPO, "lingmulongtai/CodexBar-Mac-Mobile-Connect");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(GITHUB_REPO, "lingmulongtai/Win-CodexBar-Mobile-Connect");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_never_executes_or_applies_an_installer() {
+        assert!(apply_update(&PathBuf::from("CodexBar-1.2.6-Setup.exe")).is_err());
+        let info = UpdateInfo {
+            version: "v1.2.6".into(),
+            download_url: "https://example.test/Setup.exe".into(),
+            expected_sha256: Some("a".repeat(64)),
+            release_url: String::new(),
+            release_notes: String::new(),
+            delivery: UpdateDelivery::Installer,
+        };
+        assert!(!info.supports_auto_download());
+        assert!(!info.supports_auto_apply());
+    }
+
+    #[test]
     fn test_version_comparison() {
         assert!(is_newer_version("1.0.1", "1.0.0"));
         assert!(is_newer_version("1.1.0", "1.0.0"));
@@ -752,14 +795,21 @@ mod tests {
             prerelease: false,
         };
 
-        let update = select_release_target(&release).expect("update target");
+        let update = select_release_target_for(&release, true).expect("update target");
 
         assert_eq!(
             update.download_url,
             "https://example.com/CodexBar-1.2.6-Setup.exe"
         );
-        assert!(update.supports_auto_apply());
-        assert!(update.supports_auto_download());
+        assert_eq!(update.delivery, UpdateDelivery::Installer);
+        assert_eq!(update.supports_auto_apply(), cfg!(windows));
+        assert_eq!(update.supports_auto_download(), cfg!(windows));
+        let manual = select_release_target_for(&release, false).unwrap();
+        assert_eq!(manual.delivery, UpdateDelivery::Manual);
+        assert_eq!(manual.download_url, release.html_url);
+        assert!(manual.expected_sha256.is_none());
+        assert!(!manual.supports_auto_download());
+        assert!(!manual.supports_auto_apply());
     }
 
     #[test]

@@ -241,3 +241,23 @@ describe("AboutTab Mac grouped layout", () => {
     expect(screen.getByRole("button", { name: "AboutCheckForUpdates" })).toBeEnabled();
   });
 });
+
+
+it("uses the Mac repository and makes automatic installation unavailable", async () => {
+  tauriMocks.getAppInfo.mockResolvedValue({
+    name: "CodexBar + Mobile Connect", version: "0.72.0", buildNumber: "dev",
+    updateChannel: "stable", tagline: "Mac receiver",
+    repositoryUrl: "https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect",
+    supportsAutomaticUpdates: false,
+  });
+  tauriMocks.openExternalUrl.mockResolvedValue(undefined);
+  render(<AboutTab settings={{ ...settings, autoDownloadUpdates: true }} set={vi.fn()} saving={false} />);
+  const toggle = await screen.findByRole("checkbox", { name: "AutoDownloadUpdates" });
+  expect(toggle).toBeDisabled();
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByText("MacManualUpdatesHelper")).toBeInTheDocument();
+  for (const [label, suffix] of [["AboutLinkGitHub", ""], ["AboutLinkWebsite", "#readme"], ["SubmitIssue", "/issues/new"]]) {
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(tauriMocks.openExternalUrl).toHaveBeenLastCalledWith(`https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect${suffix}`);
+  }
+});

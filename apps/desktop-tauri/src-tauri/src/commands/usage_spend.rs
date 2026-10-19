@@ -251,6 +251,24 @@ struct BuiltUsageSpendSummary {
 
 #[tauri::command]
 pub async fn get_usage_spend_summary(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<AppState>>,
+    period: Option<String>,
+    force_refresh: Option<bool>,
+) -> Result<UsageSpendSummary, String> {
+    if let Some(mut remote) = crate::desktop_peer::view(&app) {
+        if force_refresh.unwrap_or(false) {
+            crate::desktop_peer::refresh_desktop_peer(app.clone()).await;
+            remote = crate::desktop_peer::view(&app)
+                .filter(|current| current.source_id == remote.source_id)
+                .ok_or("Display source changed while refreshing")?;
+        }
+        return Ok(remote.spend_summary());
+    }
+    get_local_usage_spend_summary(state, period, force_refresh).await
+}
+
+pub(crate) async fn get_local_usage_spend_summary(
     state: State<'_, Mutex<AppState>>,
     period: Option<String>,
     force_refresh: Option<bool>,

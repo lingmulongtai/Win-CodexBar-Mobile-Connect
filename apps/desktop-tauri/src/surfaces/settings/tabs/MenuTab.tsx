@@ -199,12 +199,12 @@ export default function MenuTab({ settings, set, saving }: TabProps) {
       <SettingsGroup title={t("AgentSessionsTitle")}>
         <Field
           label={t("AgentSessionsStayAwakeLabel")}
-          description={t("AgentSessionsStayAwakeHelper")}
+          description={t(settings.platformCapabilities?.stayAwake === false ? "NativeFeatureWindowsOnly" : "AgentSessionsStayAwakeHelper")}
         >
           <Toggle
             variant="switch"
             checked={settings.stayAwakeEnabled ?? false}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.stayAwake === false}
             onChange={(v) => set({ stayAwakeEnabled: v })}
           />
         </Field>

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Win-CodexBar + Mobile Connect",
-  "version": "0.71.1",
+  "version": "0.72.0",
   "identifier": "com.lingmulongtai.wincodexbar.mobile",
   "build": {
     "beforeDevCommand": "pnpm run dev",

@@ -782,3 +782,22 @@ describe("GeneralTab notifications pane", () => {
     expect(screen.queryAllByRole("button", { name: /NotificationTestSound$/ })).toHaveLength(0);
   });
 });
+
+
+describe("native platform availability", () => {
+  it("disables unavailable Mac integrations while retaining manual refresh and low power", async () => {
+    const set = vi.fn();
+    render(<GeneralTab settings={{ ...settings, platformCapabilities: {
+      startAtLogin: false, notifications: false, sound: false,
+      stayAwake: false, automaticLowPower: false, powertoys: false,
+    } }} set={set} saving={false} />);
+    expect(await screen.findByRole("checkbox", { name: "StartAtLogin" })).toBeDisabled();
+    const lowPower = screen.getByRole("combobox", { name: "LowPowerMode" });
+    expect(lowPower).toBeEnabled();
+    expect(within(lowPower).getByRole("option", { name: "LowPowerModeAutomatic" })).toBeDisabled();
+    expect(within(lowPower).getByRole("option", { name: "LowPowerModeOn" })).toBeEnabled();
+    fireEvent.change(lowPower, { target: { value: "on" } });
+    expect(set).toHaveBeenCalledWith({ lowPowerModePreference: "on" });
+    expect(screen.getByRole("checkbox", { name: "StartMinimized" })).toBeEnabled();
+  });
+});

@@ -1,6 +1,6 @@
 # Win-CodexBar + Mobile Connect
 
-WindowsでAIサービスの使用量を取得し、**CodexBar for Android**へ暗号化して共有するアプリです。[nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar)にモバイル接続機能を加えた独立したフォークです。
+WindowsでAIサービスの使用量を取得し、**Android・Windows・Mac**へ暗号化して共有するアプリです。[nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar)にモバイル接続機能を加えた独立したフォークです。
 
 ## ダウンロード
 
@@ -42,6 +42,20 @@ v0.71.0では、独立した「モバイル接続」タブ、PCに保存する�
 ![公開EXE v0.70.6でGemini Appsの使用量を表示（デモデータ）](docs/images/mobile-connect/windows-v0.70.6-gemini-usage-ja.jpg)
 
 ![公開EXE v0.70.6のGemini Apps接続設定](docs/images/mobile-connect/windows-v0.70.6-gemini-connection-ja.jpg)
+
+## 他のPCとの接続
+
+**設定 → モバイル接続 → 他のPCから受信**で、PC名と送信元の接続コードを入力して接続します。表示元で**このPC**を選ぶとローカル表示へ戻ります。Windows同士・WindowsとMacで同じ暗号化プロトコルを使います。互いのデータを表示しながら、それぞれ自身で取得したデータを共有できます。受信データをローカルの取得データとして再送しません。
+
+履歴・費用は選択したPCの保存記録・集計期間・タイムゾーンを使い、共有されないプロジェクト・会話の詳細を別データで補完しません。接続先はプロバイダの認証情報と別に保存し、更新後も保持します。Tailscaleのexit nodeは不要です。
+
+[Mac版・PC同士の接続ガイド](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect) · [3つのアプリをまとめたGitHub Project](https://github.com/users/lingmulongtai/projects/3)
+
+ネイティブWindows v0.72.0開発ビルドで、独立したデモ設定を使用しています。実アカウントや接続キーは含みません。
+
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.jpg)
+
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.jpg)
 
 ## スマホとの接続
 

@@ -37,6 +37,7 @@ pub(crate) fn file_stamp(path: &Path) -> Option<FileStamp> {
             .as_millis(),
     })
 }
+#[cfg(windows)]
 pub(crate) fn platform_file_identity(path: &Path, _metadata: &fs::Metadata) -> Option<String> {
     use std::os::windows::io::AsRawHandle;
 
@@ -55,6 +56,20 @@ pub(crate) fn platform_file_identity(path: &Path, _metadata: &fs::Metadata) -> O
     }
     let file_index = ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64;
     Some(format!("{}:{file_index}", info.dwVolumeSerialNumber))
+}
+#[cfg(unix)]
+pub(crate) fn platform_file_identity(_path: &Path, metadata: &fs::Metadata) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(format!("{}:{}", metadata.dev(), metadata.ino()))
+}
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn platform_file_identity(_path: &Path, metadata: &fs::Metadata) -> Option<String> {
+    metadata
+        .created()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos().to_string())
 }
 pub(crate) fn digest_bytes(
     path: &Path,

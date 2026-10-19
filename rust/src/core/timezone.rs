@@ -18,6 +18,7 @@
 //! proceed, so no thread can reach `iana_time_zone` while pinning is still
 //! in progress.
 
+#[cfg(windows)]
 use std::sync::LazyLock;
 
 /// Zone used when the OS timezone cannot be read safely.

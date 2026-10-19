@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDesktopPeerStatus } from "../../../hooks/useDesktopPeerStatus";
+import { DesktopPeerBanner } from "../../../components/DesktopPeerBanner";
 import { save } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useLocale } from "../../../hooks/useLocale";
@@ -53,6 +55,9 @@ type BreakdownView = "providers" | "projects" | "sessions";
  */
 export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
+  const peer = useDesktopPeerStatus();
+  const isRemote = Boolean(peer?.selectedId);
+  const requestRef = useRef(0);
   const period = normalizeCostPeriod(settings.spendDashboardPeriod ?? settings.costReportingPeriod);
   const trackCosts = settings.costUsageEnabled ?? true;
   const includeOpenCodex = settings.openCodexUsageLogsEnabled ?? false;
@@ -67,24 +72,28 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const [view, setView] = useState<BreakdownView>("providers");
 
   const load = useCallback(async (forceRefresh = false, silent = false) => {
+    const request = ++requestRef.current;
     if (!silent) {
       setLoading(true);
       setError(null);
     }
     try {
       const data = await getUsageSpendSummary({ period, forceRefresh });
+      if (request !== requestRef.current) return;
       setSummary(data);
       if (silent) setError(null);
     } catch (err: unknown) {
-      if (!silent) setError(err instanceof Error ? err.message : String(err));
+      if (!silent && request === requestRef.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && request === requestRef.current) setLoading(false);
     }
     // The OpenCodex flags and Track costs change what the backend scans.
-  }, [period, trackCosts, includeOpenCodex, hideNativeCodex]);
+  }, [peer?.sourceId, period, trackCosts, includeOpenCodex, hideNativeCodex]);
 
   useEffect(() => {
+    setSummary(null);
     void load(false);
+    return () => { requestRef.current++; };
   }, [load]);
 
   // Upstream 0.55.0 #3106 parity: provider token/cost publications refresh the
@@ -101,7 +110,7 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
         if (!cancelled) void load(false, true);
       }, 200);
     };
-    for (const event of ["provider-updated", "settings-changed"]) {
+    for (const event of ["provider-updated", "settings-changed", "desktop-peer-changed"]) {
       void listen(event, schedule)
         .then((fn) => {
           if (cancelled) fn();
@@ -116,7 +125,7 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
     };
   }, [load]);
 
-  const tracking = trackCosts && summary?.costTrackingEnabled !== false;
+  const tracking = (isRemote || trackCosts) && summary?.costTrackingEnabled !== false;
   const visible = useMemo(
     () => (summary && tracking ? visibleUsageSpendSummary(summary, hidden) : null),
     [summary, tracking, hidden],
@@ -194,8 +203,10 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
         </button>
       </div>
 
-      {trackCosts && (
-        <PeriodPicker value={period} disabled={saving} onChange={(next) => set({ spendDashboardPeriod: next })} t={t} />
+      <DesktopPeerBanner status={peer} />
+      {isRemote && <p className="settings-section__caption">{t("DesktopPeerDataHelp")}</p>}
+      {(isRemote || trackCosts) && (
+        <PeriodPicker value={isRemote ? summary?.reportingPeriod ?? period : period} disabled={saving || isRemote} onChange={(next) => set({ spendDashboardPeriod: next })} t={t} />
       )}
 
       {error && (
@@ -217,7 +228,8 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
             tokenActivity={tokenActivity}
             contractHidden={contractHidden}
             loading={loading}
-            view={view}
+            view={isRemote ? "providers" : view}
+            remote={isRemote}
             onView={setView}
             hidePersonalInfo={settings.hidePersonalInfo ?? false}
             t={t}
@@ -232,13 +244,13 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
             <Toggle
               variant="switch"
               checked={trackCosts}
-              disabled={saving}
+              disabled={saving || isRemote}
               onChange={(value) => set({ costUsageEnabled: value })}
             />
           </Field>
           {/* Mac PreferencesSpendDashboardPane.swift:498-512: OpenCodex and the Sources
               filter only show while Track costs is on (#825). */}
-          {trackCosts && (
+          {trackCosts && !isRemote && (
             <>
               <Field label={t("UsageSpendOpenCodexImport")}>
                 <Toggle
@@ -348,6 +360,7 @@ function PeriodPicker({
 }
 
 function DashboardBody({
+  remote = false,
   summary,
   tokenActivity,
   contractHidden,
@@ -359,6 +372,7 @@ function DashboardBody({
 }: {
   summary: UsageSpendSummary;
   tokenActivity: TokenActivityPoint[];
+  remote?: boolean;
   contractHidden: boolean;
   loading: boolean;
   view: BreakdownView;
@@ -400,7 +414,7 @@ function DashboardBody({
 
       <div className="usage-spend__card">
         <div className="provider-detail-segmented usage-spend__segmented" role="tablist" aria-label={t("UsageSpendBreakdownLabel")}>
-          {views.map((option) => (
+          {views.filter(option => !remote || option.id === "providers").map((option) => (
             <button
               key={option.id}
               type="button"

@@ -2666,3 +2666,4 @@ fn antigravity_additional_profile_homes_default_empty_and_round_trip() {
         vec!["D:\\gemini-work"]
     );
 }
+mod unreadable_file;

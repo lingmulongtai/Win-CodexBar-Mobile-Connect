@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getCachedProviders: vi.fn(),
+  getDesktopPeerStatus: vi.fn(),
   getProviderChartData: vi.fn(),
   getProviderLocalUsageSummary: vi.fn(),
   refreshProviders: vi.fn(),
@@ -232,6 +233,7 @@ describe("FloatBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tauriMocks.refreshProviders.mockResolvedValue(undefined);
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue({ selectedId: null, sourceId: "local", connections: [], receiving: false, connected: false, lastReceived: null, name: null, error: null, storageError: null });
     tauriMocks.refreshProvidersIfStale.mockResolvedValue(undefined);
     tauriMocks.getProviderLocalUsageSummary.mockResolvedValue(null);
     tauriMocks.getLocaleStrings.mockResolvedValue(

@@ -136,12 +136,12 @@ export default function AdvancedTab({ settings, set, saving }: TabProps) {
       </SettingsGroup>
 
       <SettingsGroup title={t("SectionLocalIntegrations")}>
-        <Field label={t("PowerToysPipeLabel")} description={t("PowerToysPipeHelper")}>
+        <Field label={t("PowerToysPipeLabel")} description={t(settings.platformCapabilities?.powertoys === false ? "NativeFeatureWindowsOnly" : "PowerToysPipeHelper")}>
           <Toggle
             variant="switch"
             checked={settings.powertoysStatusPipeEnabled}
             ariaLabel={t("PowerToysPipeLabel")}
-            disabled={saving}
+            disabled={saving || settings.platformCapabilities?.powertoys === false}
             onChange={(v) => set({ powertoysStatusPipeEnabled: v })}
           />
         </Field>

@@ -1,6 +1,6 @@
 [package]
 name = "codexbar"
-version = "0.71.1"
+version = "0.72.0"
 edition = "2024"
 authors = ["CodexBar Contributors"]
 description = "Windows and WSL system tray app for monitoring AI provider usage limits"
@@ -14,6 +14,8 @@ path = "src/lib.rs"
 
 [features]
 default = []
+# In-process keys for dependent unit-test crates; forbidden in release builds.
+test-secure-storage = []
 
 [dependencies]
 # Async runtime
@@ -103,6 +105,9 @@ windows = { version = "0.58", features = [
 ] }
 
 winreg = "0.55"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

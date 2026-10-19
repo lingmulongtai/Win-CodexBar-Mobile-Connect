@@ -1,6 +1,6 @@
 # Win-CodexBar + Mobile Connect
 
-Windows AI usage monitoring with encrypted sharing to **CodexBar for Android**. An independently maintained fork of [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar), originally based on [steipete/CodexBar](https://github.com/steipete/CodexBar).
+Windows AI usage monitoring with encrypted sharing to **Android, Windows and Mac**. An independently maintained fork of [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar), originally based on [steipete/CodexBar](https://github.com/steipete/CodexBar).
 
 [日本語](README.ja-JP.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
 
@@ -54,6 +54,20 @@ The following native Windows captures use the downloaded, published **v0.70.6 EX
 Dedicated-mode controls captured from the initial October 17 candidate's actual Windows EXE with an anonymous profile, before the browser-import controls were added:
 
 ![Native Windows dedicated Gemini connection controls, local v0.71.1 candidate](docs/images/mobile-connect/windows-gemini-browser-development-ja.png)
+
+## Connect another desktop
+
+In **Settings → Mobile Connect → Receive from another PC**, enter a PC name and the sharing PC’s connection code, then select **Save and connect**. Choose **This PC** to return to local usage. Windows↔Windows and Windows↔Mac use the same encrypted protocol; both PCs can share their own data while displaying each other. Received data is never forwarded as locally collected data.
+
+History and spend use the selected PC’s saved observations, reporting period and time zone. Missing project/conversation details remain unavailable. Saved connections are separate from provider credentials and survive app updates. Tailscale works without an exit node.
+
+[Mac app and desktop connection guide](https://github.com/lingmulongtai/CodexBar-Mac-Mobile-Connect) · [All three apps in one GitHub Project](https://github.com/users/lingmulongtai/projects/3)
+
+Native Windows v0.72.0 development build, isolated synthetic profiles; the images do not contain account data or connection keys.
+
+![Desktop receiving settings](docs/images/mobile-connect/windows-v0.72.0-peer-settings-ja.jpg)
+
+![Received quota dashboard](docs/images/mobile-connect/windows-v0.72.0-peer-dashboard-ja.jpg)
 
 ## Connect
 

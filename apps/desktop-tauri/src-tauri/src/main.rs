@@ -6,6 +6,7 @@ mod auto_refresh;
 mod auto_resume;
 mod coding_activity;
 mod commands;
+mod desktop_peer;
 mod events;
 mod floatbar;
 mod geometry_store;
@@ -234,6 +235,7 @@ fn main() {
         .manage(Mutex::new(initial_state))
         .manage(commands::CurrencyRateCache::default())
         .manage(mobile_bridge::MobileSharing::default())
+        .manage(desktop_peer::PeerReceiver::default())
         .plugin(shortcut_bridge::plugin())
         .plugin(tauri_plugin_dialog::init());
     // Isolated proof profiles must not forward their launch to the user's resident.
@@ -249,6 +251,11 @@ fn main() {
     builder
         .invoke_handler(ipc_guard::guard(tauri::generate_handler![
             commands::get_bootstrap_state,
+            desktop_peer::get_desktop_peer_status,
+            desktop_peer::save_desktop_peer,
+            desktop_peer::select_desktop_peer,
+            desktop_peer::remove_desktop_peer,
+            desktop_peer::refresh_desktop_peer,
             mobile_bridge::get_mobile_sharing_status,
             mobile_bridge::get_provider_quota_history,
             mobile_network::get_mobile_network_addresses,
@@ -410,6 +417,7 @@ fn main() {
             auto_refresh::install(app.handle().clone());
             stay_awake::install(app.handle().clone());
             mobile_bridge::install(app.handle().clone());
+            desktop_peer::install(app.handle().clone());
             if settings.powertoys_status_pipe_enabled {
                 powertoys::install(app.handle().clone());
             }

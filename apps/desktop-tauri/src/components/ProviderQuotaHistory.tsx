@@ -11,10 +11,10 @@ export default function ProviderQuotaHistory({ provider, t, onLayoutChange, now 
 }) {
   const [days, setDays] = useState(7);
   const [result, setResult] = useState<{ key: string; series: ProviderQuotaHistorySeries[] } | null>(null);
-  const requestKey = `${provider.providerId}|${provider.updatedAt}|${provider.accountEmail ?? ""}`;
+  const requestKey = `${provider.sourceLabel}|${provider.providerId}|${provider.updatedAt}|${provider.accountEmail ?? ""}`;
   useEffect(() => {
     let current = true;
-    void getProviderQuotaHistory(provider.providerId, provider.updatedAt).then(series => {
+    void getProviderQuotaHistory(provider.providerId, provider.updatedAt, provider.sourceLabel).then(series => {
       if (current) setResult({ key: requestKey, series });
     }).catch(() => { if (current) setResult({ key: requestKey, series: [] }); });
     return () => { current = false; };

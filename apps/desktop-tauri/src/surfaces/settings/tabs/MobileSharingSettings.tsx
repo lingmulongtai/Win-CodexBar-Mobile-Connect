@@ -3,6 +3,7 @@ import { Field, SettingsGroup, Toggle } from "../../../components/FormControls";
 import { useLocale } from "../../../hooks/useLocale";
 import { configureMobileSharing, getMobilePairingCode, getMobileSharingStatus, getMobileNetworkAddresses, revokeMobilePairing, setMobileRemoteSettings } from "../../../lib/tauri";
 import type { MobileNetworkAddresses, MobileSharingStatus } from "../../../types/bridge";
+import DesktopPeerSettings from "./DesktopPeerSettings";
 
 export default function MobileSharingSettings() {
   const { t } = useLocale();
@@ -41,7 +42,7 @@ export default function MobileSharingSettings() {
     const next = await configureMobileSharing(enabled, endpoint, parsedPort);
     setStatus(next); setAddress(next.address); setPort(String(next.port));
   }
-  return <SettingsGroup title={t("MobileSharingTitle")} footer={<p>{t("MobileSharingHelper")}</p>}>
+  return <><DesktopPeerSettings /><SettingsGroup title={t("MobileSharingTitle")} footer={<p>{t("MobileSharingHelper")}</p>}>
     <div className="settings-group__row">
       <strong role="status">{status?.running ? t("MobileSharingRunning") : status?.enabled ? t("MobileSharingPending") : t("MobileSharingStopped")}</strong>
       {status?.running && <button className="credential-btn credential-btn--primary" disabled={busy} onClick={() => void run(async () => {
@@ -90,5 +91,5 @@ export default function MobileSharingSettings() {
       })}>{t("MobileSharingRevoke")}</button>
     </div>
     {message && <p aria-live="polite">{message}</p>}
-  </SettingsGroup>;
+  </SettingsGroup></>;
 }

@@ -4,10 +4,9 @@
 
 use std::process::Command;
 
-fn main() {
-    // Get git commit hash
-    let git_commit = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+fn git_value(args: &[&str]) -> Option<String> {
+    Command::new("git")
+        .args(args)
         .output()
         .ok()
         .and_then(|output| {
@@ -17,20 +16,38 @@ fn main() {
                 None
             }
         })
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+}
+
+fn watch_git_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::PathBuf::from(git_value(&[
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        name,
+    ])?);
+    // Missing rerun paths make Cargo rerun this script on every invocation.
+    if !path.is_file() {
+        return None;
+    }
+    println!("cargo:rerun-if-changed={}", path.display());
+    Some(path)
+}
+
+fn main() {
+    let git_commit =
+        git_value(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
 
     println!("cargo:rustc-env=GIT_COMMIT={}", git_commit);
 
-    // Re-run if git HEAD changes
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
-        let head = head.trim();
-        if let Some(reference) = head.strip_prefix("ref: ") {
-            let reference = reference.trim();
-            if !reference.is_empty() {
-                println!("cargo:rerun-if-changed=.git/{}", reference);
-            }
-        }
+    println!("cargo:rerun-if-changed=build.rs");
+    // Git resolves metadata correctly for clones, worktrees and submodules.
+    if let Some(head_path) = watch_git_path("HEAD")
+        && let Ok(head) = std::fs::read_to_string(head_path)
+        && let Some(reference) = head.trim().strip_prefix("ref: ")
+    {
+        drop(watch_git_path(reference));
     }
+    drop(watch_git_path("packed-refs"));
 }

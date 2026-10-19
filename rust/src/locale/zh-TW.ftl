@@ -1767,3 +1767,20 @@ QuotaArchiveTitle = Usage history
 QuotaArchiveHelp = Saved on this PC for 90 days and shared with paired devices. Shows recorded observations; older data may be summarized daily. Missing periods are not estimated.
 QuotaArchiveSevenDays = 7 days
 QuotaArchiveThirtyDays = 30 days
+
+# Desktop connections and native platform support
+DesktopPeerTitle = 從另一台電腦接收
+DesktopPeerHelp = 在Windows或Mac共享電腦上啟用共享並複製連線代碼。在此貼上即可透過區域網路或Tailscale接收用量、歷史與費用，無需出口節點。本機仍可同時共享自己的資料。
+DesktopPeerSource = 顯示來源
+DesktopPeerLocal = 本機
+DesktopPeerName = 電腦名稱
+DesktopPeerCode = 連線代碼
+DesktopPeerConnect = 儲存並連線
+DesktopPeerRemove = 移除電腦
+DesktopPeerConnected = 已連線
+DesktopPeerReceiving = 正在接收…
+DesktopPeerOffline = 等待共享電腦
+DesktopPeerEmpty = 尚未儲存電腦。
+DesktopPeerDataHelp = 用量、歷史與費用來自所選電腦，採用該電腦的統計週期與時區。不共享專案及對話詳情。登入和收集設定僅套用於本機；選擇本機可檢視本地資料。
+NativeFeatureWindowsOnly = 此原生整合功能目前僅支援Windows。
+MacManualUpdatesHelper = 從本應用的發行頁面下載Mac DMG，結束應用程式，再取代Applications中的應用程式。

@@ -982,9 +982,35 @@ impl From<&codexbar::status::ProviderStatus> for ProviderServiceStatus {
     }
 }
 
+/// Availability reflects implemented native integrations, not saved preferences.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformCapabilities {
+    start_at_login: bool,
+    notifications: bool,
+    sound: bool,
+    stay_awake: bool,
+    automatic_low_power: bool,
+    powertoys: bool,
+}
+
+impl PlatformCapabilities {
+    fn current() -> Self {
+        Self {
+            start_at_login: cfg!(windows),
+            notifications: cfg!(windows),
+            sound: cfg!(windows),
+            stay_awake: cfg!(windows),
+            automatic_low_power: cfg!(windows),
+            powertoys: cfg!(windows),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSnapshot {
+    platform_capabilities: PlatformCapabilities,
     preferred_currency_code: String,
     enabled_providers: Vec<String>,
     provider_order: Vec<String>,
@@ -1168,6 +1194,7 @@ impl From<Settings> for SettingsSnapshot {
             .collect();
 
         Self {
+            platform_capabilities: PlatformCapabilities::current(),
             preferred_currency_code: settings.preferred_currency_code,
             enabled_providers,
             provider_order,

@@ -334,6 +334,7 @@ mod pi_family_tests {
         assert_eq!(pi_family_dialect(records[6].command.as_deref().unwrap()), None);
     }
 
+    #[cfg(windows)]
     #[test]
     fn windows_shims_and_paths_are_normalized_for_dialect() {
         assert_eq!(
@@ -682,7 +683,11 @@ mod pi_family_tests {
     fn config_dir_must_stay_within_home() {
         let home = tempfile::tempdir().expect("tempdir");
         let cwd = home.path().to_path_buf();
-        for bad in ["/abs/path", "..", "../escape", "~/x", "C:\\escape"] {
+        let mut bad_dirs = vec!["/abs/path", "..", "../escape", "~/x"];
+        if cfg!(windows) {
+            bad_dirs.push("C:\\escape");
+        }
+        for bad in bad_dirs {
             let env = env_map(&[("PI_CONFIG_DIR", bad)]);
             assert!(
                 omp_default_profile_root(&env, &cwd, home.path()).is_none(),

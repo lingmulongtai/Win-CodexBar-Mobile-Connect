@@ -312,6 +312,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn persisted_file_is_secure_wrapped() {
         let root = temp_root("secure");

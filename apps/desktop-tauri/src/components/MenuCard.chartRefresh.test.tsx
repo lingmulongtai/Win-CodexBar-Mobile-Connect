@@ -58,11 +58,11 @@ function snapshot(updatedAt: string): ProviderUsageSnapshot {
   };
 }
 
-function card(updatedAt: string) {
+function card(updatedAt: string, override: Partial<ProviderUsageSnapshot> = {}) {
   return (
     <LocaleProvider>
       <MenuCard
-        provider={snapshot(updatedAt)}
+        provider={{ ...snapshot(updatedAt), ...override }}
         display={{ hideEmail: false, resetTimeRelative: true }}
       />
     </LocaleProvider>
@@ -105,5 +105,12 @@ describe("MenuCard chart refresh", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("refreshes shared cost data on receipt even when the sender's quota timestamp is unchanged", async () => {
+    const { rerender } = render(card("unchanged", { sourceLabel: "peer:home:1|account", peerReceivedAt: 100 }));
+    await waitFor(() => expect(tauriMocks.getProviderChartData).toHaveBeenCalledTimes(1));
+    rerender(card("unchanged", { sourceLabel: "peer:home:1|account", peerReceivedAt: 130 }));
+    await waitFor(() => expect(tauriMocks.getProviderChartData).toHaveBeenCalledTimes(2));
   });
 });

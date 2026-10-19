@@ -12,6 +12,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TrayVisibilitySupport {
+    #[cfg_attr(not(windows), allow(dead_code, reason = "cross-platform status DTO"))]
     Supported,
     UnsupportedOs,
 }
@@ -19,8 +20,11 @@ pub enum TrayVisibilitySupport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PromotionState {
+    #[cfg_attr(not(windows), allow(dead_code, reason = "cross-platform status DTO"))]
     Promoted,
+    #[cfg_attr(not(windows), allow(dead_code, reason = "cross-platform status DTO"))]
     NotPromoted,
+    #[cfg_attr(not(windows), allow(dead_code, reason = "cross-platform status DTO"))]
     EntryNotFound,
 }
 
@@ -77,6 +81,7 @@ impl From<PromotionState> for PromotionStateSafe {
 // ── Pure helpers (tested without registry access) ────────────────────────────
 
 /// True for Windows 11 build numbers (≥ 22000).
+#[cfg(any(windows, test))]
 pub fn is_win11_build(build: u32) -> bool {
     build >= 22000
 }
@@ -85,6 +90,7 @@ pub fn is_win11_build(build: u32) -> bool {
 ///
 /// Strips the `\\?\` / `\\?\UNC\` extended prefixes that `current_exe()` may
 /// return, unifies separators, and lowercases.
+#[cfg(any(windows, test))]
 pub fn normalize_exe_path(path: &str) -> String {
     let mut s = path.replace('/', "\\");
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
@@ -98,12 +104,14 @@ pub fn normalize_exe_path(path: &str) -> String {
 /// Case-insensitive path comparison after stripping trailing separators and
 /// Win32 extended-length prefixes.
 /// Returns true when `entry_path` names the same executable as `exe_path`.
+#[cfg(any(windows, test))]
 pub fn matches_current_exe(entry_path: &str, exe_path: &std::path::Path) -> bool {
     normalize_exe_path(entry_path) == normalize_exe_path(&exe_path.to_string_lossy())
 }
 
 /// True when both paths end with the same file name (case-insensitive).
 /// Used as a fallback when the full path differs after an install-dir move.
+#[cfg(windows)]
 pub fn matches_exe_file_name(entry_path: &str, exe_path: &std::path::Path) -> bool {
     let entry_name = normalize_exe_path(entry_path)
         .rsplit('\\')
@@ -284,6 +292,7 @@ pub fn apply_promotion(promote: bool) {
             tracing::debug!("tray promotion applied: {state:?}");
         }
         Err(TrayVisibilityError::Unsupported) => {}
+        #[cfg(windows)]
         Err(ref e) => {
             tracing::warn!("tray visibility: could not apply promotion: {e}");
         }
@@ -360,6 +369,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn matches_exe_file_name_across_install_dirs() {
         assert!(matches_exe_file_name(

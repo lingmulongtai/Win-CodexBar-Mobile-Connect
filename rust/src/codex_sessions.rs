@@ -109,6 +109,7 @@ fn push_unique_path(dirs: &mut Vec<PathBuf>, seen: &mut HashSet<String>, path: P
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
     #[test]
     fn normalizes_codex_root_to_sessions_dir() {
         assert_eq!(

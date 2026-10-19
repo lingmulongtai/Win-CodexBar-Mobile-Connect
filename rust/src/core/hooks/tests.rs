@@ -159,7 +159,7 @@ fn config_matching_respects_enabled_flag() {
         events: vec![],
         provider: None,
         threshold: None,
-        executable: PathBuf::from("C:\\Windows\\System32\\cmd.exe"),
+        executable: absolute_executable("cmd.exe"),
         arguments: vec![],
         timeout_secs: 5,
     };
@@ -204,6 +204,14 @@ fn rate_limiter_key_is_stable() {
     let _ = Arc::new(a);
 }
 
+fn absolute_executable(name: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(r"C:\Tools").join(name)
+    } else {
+        PathBuf::from("/usr/local/bin").join(name)
+    }
+}
+
 fn rule_with(arguments: usize) -> HookRule {
     HookRule {
         enabled: true,
@@ -211,7 +219,7 @@ fn rule_with(arguments: usize) -> HookRule {
         events: Vec::new(),
         provider: None,
         threshold: None,
-        executable: PathBuf::from(r"C:\Tools\notify.exe"),
+        executable: absolute_executable("notify.exe"),
         arguments: (0..arguments).map(|i| format!("--arg{i}")).collect(),
         timeout_secs: 10,
     }

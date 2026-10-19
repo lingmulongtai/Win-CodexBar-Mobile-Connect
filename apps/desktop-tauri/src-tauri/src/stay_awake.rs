@@ -50,6 +50,7 @@ fn publish_status_change(app: &tauri::AppHandle) {
 /// Apply a saved settings change: turning Stay Awake off releases right away,
 /// turning it on triggers a scan without waiting for the next interval.
 pub fn settings_changed(app: &tauri::AppHandle, enabled: bool) {
+    let enabled = enabled && cfg!(windows);
     let changed = controller().set_enabled(enabled);
     if changed {
         publish_status_change(app);
@@ -65,6 +66,9 @@ pub fn shutdown() {
 }
 
 pub fn install(app: tauri::AppHandle) {
+    if !cfg!(windows) {
+        return;
+    }
     controller().set_enabled(Settings::load().stay_awake_enabled);
     tauri::async_runtime::spawn(async move {
         loop {

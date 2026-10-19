@@ -9,27 +9,6 @@ import type { TabProps } from "../settingsTabs";
 import codexbarIcon from "../../../assets/codexbar-icon.png";
 
 const REPO_URL = "https://github.com/lingmulongtai/Win-CodexBar-Mobile-Connect";
-const SUBMIT_ISSUE_URL = `${REPO_URL}/issues/new?labels=bug&template=bug_report.yml`;
-
-const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
-  {
-    labelKey: "AboutLinkGitHub",
-    url: REPO_URL,
-  },
-  {
-    labelKey: "AboutLinkWebsite",
-    url: `${REPO_URL}#readme`,
-  },
-  {
-    labelKey: "AboutLinkOriginalProject",
-    url: "https://github.com/steipete/CodexBar",
-  },
-  {
-    labelKey: "SubmitIssue",
-    url: SUBMIT_ISSUE_URL,
-  },
-];
-
 export default function AboutTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
   const [appInfo, setAppInfo] = useState<AppInfoBridge | null>(null);
@@ -62,6 +41,15 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
     );
   }
 
+  const repoUrl = appInfo.repositoryUrl ?? REPO_URL;
+  const automaticUpdates = appInfo.supportsAutomaticUpdates !== false;
+  const links: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
+    { labelKey: "AboutLinkGitHub", url: repoUrl },
+    { labelKey: "AboutLinkWebsite", url: `${repoUrl}#readme` },
+    { labelKey: "AboutLinkOriginalProject", url: "https://github.com/steipete/CodexBar" },
+    { labelKey: "SubmitIssue", url: `${repoUrl}/issues/new${automaticUpdates ? "?labels=bug&template=bug_report.yml" : ""}` },
+  ];
+
   const isBusy =
     updateState.status === "checking" ||
     updateState.status === "downloading";
@@ -91,13 +79,13 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
       <SettingsGroup title={t("UpdatesTitle")}>
         <Field
           label={t("AutoDownloadUpdates")}
-          description={t("AutoDownloadUpdatesHelper")}
+          description={t(automaticUpdates ? "AutoDownloadUpdatesHelper" : "MacManualUpdatesHelper")}
         >
           <Toggle
             variant="switch"
-            checked={settings.autoDownloadUpdates}
+            checked={automaticUpdates && settings.autoDownloadUpdates}
             ariaLabel={t("AutoDownloadUpdates")}
-            disabled={saving}
+            disabled={saving || !automaticUpdates}
             onChange={(v) => set({ autoDownloadUpdates: v })}
           />
         </Field>
@@ -211,7 +199,7 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
           ) : undefined
         }
       >
-        {ABOUT_LINKS.map((link) => (
+        {links.map((link) => (
           <button
             key={link.url}
             type="button"

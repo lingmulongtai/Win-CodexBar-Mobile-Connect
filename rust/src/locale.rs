@@ -19,6 +19,9 @@ static_loader! {
 
 /// Get the localized string for a given key in the specified language
 pub fn get_text(lang: Language, key: LocaleKey) -> String {
+    if cfg!(target_os = "macos") && matches!(key, LocaleKey::AppName) {
+        return "CodexBar + Mobile Connect".to_string();
+    }
     LOCALES
         .try_lookup(language_id(lang), key.name())
         .unwrap_or_else(|| key.name().to_string())
@@ -757,6 +760,19 @@ locale_keys! {
     HidePersonalInfoHelper,
     SectionLocalIntegrations,
     MobileSharingTitle,
+    DesktopPeerTitle,
+    DesktopPeerHelp,
+    DesktopPeerSource,
+    DesktopPeerLocal,
+    DesktopPeerName,
+    DesktopPeerCode,
+    DesktopPeerConnect,
+    DesktopPeerRemove,
+    DesktopPeerConnected,
+    DesktopPeerReceiving,
+    DesktopPeerOffline,
+    DesktopPeerEmpty,
+    DesktopPeerDataHelp,
     MobileSharingHelper,
     MobileSharingTailscale,
     MobileSharingLan,
@@ -1046,6 +1062,8 @@ locale_keys! {
     ProviderServiceStatusHelp,
     LowPowerMode,
     LowPowerModeHelper,
+    NativeFeatureWindowsOnly,
+    MacManualUpdatesHelper,
     LowPowerModeOff,
     LowPowerModeOn,
     LowPowerModeAutomatic,

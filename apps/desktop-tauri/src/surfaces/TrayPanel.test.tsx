@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getCachedProviders: vi.fn(),
+  getDesktopPeerStatus: vi.fn(),
   refreshProviders: vi.fn(),
   refreshProvidersIfStale: vi.fn(),
   getSettingsSnapshot: vi.fn(),
@@ -296,6 +297,7 @@ describe("TrayPanel provider grid", () => {
     tauriMocks.getProviderStatuses.mockResolvedValue([]);
     tauriMocks.openSettingsWindow.mockResolvedValue(undefined);
     tauriMocks.refreshProviders.mockResolvedValue(undefined);
+    tauriMocks.getDesktopPeerStatus.mockResolvedValue({ selectedId: null, sourceId: "local", connections: [], receiving: false, connected: false, lastReceived: null, name: null, error: null, storageError: null });
     tauriMocks.refreshProvidersIfStale.mockResolvedValue(undefined);
     tauriMocks.dismissTrayPanel.mockResolvedValue(undefined);
     tauriMocks.reanchorTrayPanel.mockResolvedValue(undefined);
