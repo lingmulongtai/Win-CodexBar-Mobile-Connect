@@ -15,6 +15,8 @@ import AgentSessions from "../components/AgentSessions";
 import ProviderQuotaHistory from "../components/ProviderQuotaHistory";
 import { accentSelectionStyle } from "../lib/menuSelection";
 import { filterUsageSpendSummaryForOverview } from "../lib/usageSpendSharing";
+import { DesktopPeerBanner } from "../components/DesktopPeerBanner";
+import { useDesktopPeerStatus } from "../hooks/useDesktopPeerStatus";
 
 /**
  * Tray popover surface — two modes like macOS CodexBar:
@@ -25,6 +27,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
   const stayAwakeHeld = useStayAwakeStatus();
   const {
     t,
+    peer,
     settings,
     isRefreshing,
     refreshingProviderIds,
@@ -61,14 +64,14 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
   const hoverHighlight = settings.highlightMenuCardsOnHover ?? true;
 
   const banner = (
-    <UpdateBanner
+    <><DesktopPeerBanner status={peer} /><UpdateBanner
       updateState={updateState}
       onCheck={checkNow}
       onDownload={download}
       onApply={apply}
       onDismiss={dismiss}
       onOpenRelease={openRelease}
-    />
+    /></>
   );
 
   const renderProviderCard = (p: ProviderUsageSnapshot) => {
@@ -78,7 +81,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
       <div
         className={`menu-stack__item${isSelected ? " menu-stack__item--selected" : ""}`}
         id={`card-${p.providerId}`}
-        key={p.providerId}
+        key={`${p.sourceLabel}|${p.providerId}`}
       >
         <MenuCard
           provider={p}
@@ -96,12 +99,12 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
             quotaWarningMarkersVisible: settings.quotaWarningMarkersVisible ?? true,
             weeklyProgressWorkDays: settings.weeklyProgressWorkDays ?? null,
             workdayTickStyle: settings.workdayTickStyle ?? "subtle",
-            costTrackingEnabled: settings.costUsageEnabled ?? true,
+            costTrackingEnabled: peer?.selectedId ? true : settings.costUsageEnabled ?? true,
           }}
           accentColor={settings.providerAccentColors[p.providerId]}
           onLayoutChange={requestLayout}
         />
-        {isSelected && <ProviderQuotaHistory key={p.providerId} provider={p} t={t} onLayoutChange={requestLayout} />}
+        {isSelected && <ProviderQuotaHistory key={`${p.sourceLabel}|${p.providerId}`} provider={p} t={t} onLayoutChange={requestLayout} />}
       </div>
     );
   };
@@ -118,7 +121,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
         <MenuSurface banner={banner} footerGroups={footerGroups}
           statusLine={statusLine} style={surfaceStyle} hoverHighlight={hoverHighlight}>
           {stayAwakeStatus}
-          {settings.agentSessionsEnabled && <AgentSessions />}
+          {!peer?.selectedId && settings.agentSessionsEnabled && <AgentSessions />}
           <MenuEmpty
             isLoading={isRefreshing && !hasCachedData}
             onSettings={openSettings}
@@ -133,7 +136,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
       <MenuSurface banner={banner} footerGroups={footerGroups}
         statusLine={statusLine} style={surfaceStyle} hoverHighlight={hoverHighlight}>
         {stayAwakeStatus}
-        {settings.agentSessionsEnabled && <AgentSessions />}
+        {!peer?.selectedId && settings.agentSessionsEnabled && <AgentSessions />}
         <ProviderGrid
           providers={gridProviders}
           selectedProviderId={selectedProviderId}
@@ -201,11 +204,12 @@ function OverviewSpendSummary({
   t: (key: LocaleKey) => string;
 }) {
   const { preferredCode, rates } = useCurrency();
+  const peer = useDesktopPeerStatus();
   const [summary, setSummary] = useState<UsageSpendSummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (!costTrackingEnabled) {
+    if (!costTrackingEnabled && !peer?.selectedId) {
       setSummary(null);
       return () => { cancelled = true; };
     }
@@ -214,7 +218,7 @@ function OverviewSpendSummary({
       .then((value) => { if (!cancelled) setSummary(value); })
       .catch(() => { if (!cancelled) setSummary(null); });
     return () => { cancelled = true; };
-  }, [providerIds.join("|"), period, costTrackingEnabled]);
+  }, [providerIds.join("|"), period, costTrackingEnabled, peer?.sourceId, peer?.lastReceived]);
 
   // Overview consumes the same backend spend catalog as Usage & Spend. Do not
   // restrict accounting to whichever cards happen to be rendered in this tray.

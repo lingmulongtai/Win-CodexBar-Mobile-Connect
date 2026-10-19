@@ -168,12 +168,13 @@ export default function MenuCard({
   // Another provider or account must not show the previous card's chart.
   useEffect(() => {
     setChartData(null);
-  }, [provider.providerId, provider.accountEmail]);
+  }, [provider.sourceLabel, provider.providerId, provider.accountEmail]);
 
   // Re-read the local-usage chart when the local calendar day changes (seen on
   // the next render, e.g. a provider update), so "Today" does not freeze at the
   // first mount without a full transcript walk on every refresh.
   const localDay = new Date().toLocaleDateString("sv");
+  const remoteUpdate = provider.sourceLabel?.startsWith("peer:") ? provider.peerReceivedAt ?? provider.updatedAt : null;
   useEffect(() => {
     if (!providerSupportsChartData(provider.providerId)) return;
     let cancelled = false;
@@ -193,7 +194,7 @@ export default function MenuCard({
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
     // "Track costs" flips local estimates on or off; the backend answers for the new value.
-  }, [provider.providerId, provider.accountEmail, localDay, costTrackingEnabled, onLayoutChange]);
+  }, [provider.sourceLabel, provider.providerId, provider.accountEmail, remoteUpdate, localDay, costTrackingEnabled, onLayoutChange]);
 
   const isWayfinder = provider.providerId === "wayfinder";
   const email = isWayfinder ? null : headerAccount(provider, hideEmail);

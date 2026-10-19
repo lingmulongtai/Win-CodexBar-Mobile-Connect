@@ -7,7 +7,7 @@ import type { ProviderUsageSnapshot } from "../types/bridge";
 vi.mock("../lib/tauri", () => ({ getProviderQuotaHistory: vi.fn() }));
 const now = Date.parse("2026-10-18T00:00:00Z");
 const second = now / 1000;
-const provider = { providerId: "codex", updatedAt: "current" } as ProviderUsageSnapshot;
+const provider = { providerId: "codex", updatedAt: "current", sourceLabel: "local" } as ProviderUsageSnapshot;
 const t = (key: string) => key;
 beforeEach(() => vi.resetAllMocks());
 
@@ -17,7 +17,7 @@ it("shows the archived month when 30 days is selected, without inventing missing
   ] }]);
   const { container } = render(<ProviderQuotaHistory provider={provider} t={t} now={now} />);
   await screen.findByRole("img");
-  expect(getProviderQuotaHistory).toHaveBeenCalledWith("codex", "current");
+  expect(getProviderQuotaHistory).toHaveBeenCalledWith("codex", "current", "local");
   expect(container.querySelectorAll("circle")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "QuotaArchiveThirtyDays" }));
   expect(container.querySelectorAll("circle")).toHaveLength(2);
@@ -44,4 +44,16 @@ it("does not infer continuity across resets omitted by archive sampling", async 
   await screen.findByRole("img");
   expect(container.querySelectorAll("polyline, path")).toHaveLength(0);
   expect(container.querySelectorAll("line.quota-burndown-chart__observed")).toHaveLength(64);
+});
+
+it("changes history scope when another PC has the same provider and update time", async () => {
+  let finish!: (value: []) => void;
+  vi.mocked(getProviderQuotaHistory).mockImplementation((_id, _time, source) => source === "peer:first|a"
+    ? new Promise(resolve => { finish = resolve; })
+    : Promise.resolve([{ label: "Second PC", samples: [{ t: second, u: .2, r: null }] }]));
+  const { rerender } = render(<ProviderQuotaHistory provider={{ ...provider, sourceLabel: "peer:first|a" }} t={t} now={now} />);
+  rerender(<ProviderQuotaHistory provider={{ ...provider, sourceLabel: "peer:second|a" }} t={t} now={now} />);
+  await screen.findByText("Second PC");
+  await act(async () => finish([]));
+  expect(screen.getByText("Second PC")).toBeInTheDocument();
 });

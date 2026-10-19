@@ -5,6 +5,8 @@ const tauriMocks = vi.hoisted(() => ({
   getUsageSpendSummary: vi.fn(),
   writeUsageSpendExport: vi.fn(),
 }));
+const peerState = vi.hoisted(() => ({ current: null as import("../../../types/bridge").DesktopPeerStatus | null }));
+vi.mock("../../../hooks/useDesktopPeerStatus", () => ({ useDesktopPeerStatus: () => peerState.current }));
 
 vi.mock("../../../lib/tauri", () => tauriMocks);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
@@ -123,6 +125,7 @@ function stat(label: string, scope: HTMLElement = document.body): string | null 
 describe("UsageSpendTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    peerState.current = null;
     tauriMocks.getUsageSpendSummary.mockImplementation(
       async (options?: { period?: string }) => summary(options?.period ?? "rolling:30"),
     );
@@ -139,6 +142,19 @@ describe("UsageSpendTab", () => {
 
     fireEvent.click(within(range).getByRole("radio", { name: "90d" }));
     expect(set).toHaveBeenCalledWith({ spendDashboardPeriod: "rolling:90" });
+  });
+
+  it("shows the sharing PC's period even when local cost tracking is off without changing local settings", async () => {
+    peerState.current = { selectedId: "home", sourceId: "peer:home:1", name: "Home", connections: [], receiving: false, connected: true, lastReceived: 100, error: null, storageError: null };
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(summary("rolling:7"));
+    const set = renderTab({ costUsageEnabled: false, spendDashboardPeriod: "month-to-date" });
+    await screen.findByText("USD");
+    const range = screen.getByRole("radiogroup", { name: "Time range" });
+    expect(within(range).getByRole("radio", { name: "7d" })).toHaveAttribute("aria-checked", "true");
+    for (const option of within(range).getAllByRole("radio")) expect(option).toBeDisabled();
+    expect(screen.queryByRole("tab", { name: "UsageSpendProjects" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Track costs" })).toBeDisabled();
+    expect(set).not.toHaveBeenCalled();
   });
 
   it("copies the menu History window when no dashboard period is saved", async () => {

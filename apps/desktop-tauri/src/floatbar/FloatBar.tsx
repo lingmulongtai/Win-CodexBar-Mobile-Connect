@@ -137,7 +137,7 @@ type FloatBarCostTarget = {
 };
 
 function providerCostKey(provider: ProviderUsageSnapshot): string {
-  return `${provider.providerId}:${provider.accountEmail ?? ""}`;
+  return `${provider.sourceLabel}:${provider.providerId}:${provider.accountEmail ?? ""}`;
 }
 
 function hasLocalCost(summary: ProviderLocalUsageSummary | null): summary is ProviderLocalUsageSummary {
@@ -352,7 +352,7 @@ function ProviderPill({
  */
 export default function FloatBar({ state }: { state: BootstrapState }) {
   const { t } = useLocale();
-  const { providers } = useProviders({
+  const { providers, peer } = useProviders({
     refreshOnMount: false,
   });
   const startDrag = useCallback((event: MouseEvent<HTMLElement>) => {
@@ -415,7 +415,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const showCost = settings.floatBarShowCost;
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
-    let list = providers.filter((p) => enabled.has(p.providerId));
+    let list = providers.filter((p) => peer?.selectedId || enabled.has(p.providerId));
     if (filterIds && filterIds.length > 0) {
       const wanted = new Set(filterIds);
       list = list.filter((p) => wanted.has(p.providerId));
@@ -424,7 +424,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
       (a, b) =>
         b.selectedMetric.usedPercent - a.selectedMetric.usedPercent,
     );
-  }, [providers, settings.enabledProviders, filterIds]);
+  }, [providers, peer?.selectedId, settings.enabledProviders, filterIds]);
 
   const visibleCostTargets = useMemo<FloatBarCostTarget[]>(
     () =>
