@@ -17,3 +17,9 @@ Validation on Windows: the full core suite passed, **4,860 passed / 2 ignored / 
 ## Scope of the remaining upstream updates
 
 The new upstream `235ba9ecc679764d6b35fbc4e8933774ec7a511d` reorganizes 54 shell files, including provider/cache integration points customized for Mobile Connect and Gemini session renewal. This feature uses narrow ports of required fixes rather than replacing those integration points. Provider-specific updates unrelated to desktop transport remain outside this change; no upstream repository is modified. The existing Android protocol, account isolation, saved connections, history and release ownership must remain intact.
+
+## Encrypted desktop receiver
+
+The shared core can read the existing v1 sharing protocol using numeric LAN/Tailscale addresses. Requests and responses authenticate the pairing, nonce and clock; reads have a total deadline and a size bound. Received provider/history/spend fields follow the Android validation limits. This client does not write the local collector cache or archive, so adding a receiver cannot create a forwarding loop.
+
+Validation: all 21 mobile-bridge tests passed, including two concurrent receivers, revoked/wrong pairing, tampered envelopes, bounded reads and invalid provider/history/spend fields. Core Clippy with tests and `-D warnings` passed; formatting passed.
