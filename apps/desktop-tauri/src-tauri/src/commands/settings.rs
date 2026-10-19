@@ -787,12 +787,11 @@ pub(crate) fn update_settings_checked(
     patch.validate_shortcut_change(&app, &settings.global_shortcut)?;
     let float_bar_patch = patch.apply_to(&mut settings)?;
 
+    settings.save().map_err(|e| e.to_string())?;
+    drop(write_guard);
     if settings.ui_language != previous_language {
         let _ = app.emit(events::LOCALE_CHANGED, language_label(settings.ui_language));
     }
-
-    settings.save().map_err(|e| e.to_string())?;
-    drop(write_guard);
     if previous_limit_reset && !settings.limit_reset_notifications_enabled {
         // The next refresh batch also clears it; doing it here forgets the
         // saved reset state even if the app quits before that refresh.
