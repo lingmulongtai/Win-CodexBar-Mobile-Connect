@@ -4,6 +4,7 @@
 //! env (no secret leakage). Consent is the Settings Adaptive toggle itself.
 
 /// Process base names (lowercase, without `.exe`) that count as coding activity.
+#[cfg(any(windows, test))]
 const AGENT_PROCESS_NAMES: &[&str] = &[
     "claude",
     "codex",

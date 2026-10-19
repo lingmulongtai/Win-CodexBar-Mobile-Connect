@@ -1,18 +1,27 @@
+#[cfg(windows)]
 use std::sync::Mutex;
+#[cfg(windows)]
 use std::time::Duration;
 
+#[cfg(windows)]
 use chrono::Utc;
+#[cfg(any(windows, test))]
 use serde::Serialize;
+#[cfg(windows)]
 use tauri::Manager;
 
+#[cfg(any(windows, test))]
 use crate::commands::{
     ProviderLocalUsageSummary, ProviderUsageSnapshot, RateWindowSnapshot,
     cached_provider_local_usage_summary,
 };
+#[cfg(windows)]
 use crate::state::AppState;
 
+#[cfg(windows)]
 pub const STATUS_PIPE_NAME: &str = r"\\.\pipe\WinCodexBar.Status";
 
+#[cfg(windows)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerToysSnapshot {
@@ -21,6 +30,7 @@ pub struct PowerToysSnapshot {
     providers: Vec<PowerToysProviderSnapshot>,
 }
 
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerToysProviderSnapshot {
@@ -54,6 +64,7 @@ pub fn install(app: tauri::AppHandle) {
     });
 }
 
+#[cfg(windows)]
 pub fn snapshot(app: &tauri::AppHandle) -> PowerToysSnapshot {
     let providers = app
         .state::<Mutex<AppState>>()
@@ -71,6 +82,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> PowerToysSnapshot {
     }
 }
 
+#[cfg(any(windows, test))]
 fn provider_snapshot(provider: ProviderUsageSnapshot) -> PowerToysProviderSnapshot {
     let local_usage = cached_local_usage(&provider.provider_id);
     let status_text = if provider.error.is_some() {
@@ -105,6 +117,7 @@ fn provider_snapshot(provider: ProviderUsageSnapshot) -> PowerToysProviderSnapsh
     }
 }
 
+#[cfg(any(windows, test))]
 fn provider_subtitle(
     provider: &ProviderUsageSnapshot,
     local_usage: Option<&ProviderLocalUsageSummary>,
@@ -127,6 +140,7 @@ fn provider_subtitle(
     }
 }
 
+#[cfg(any(windows, test))]
 fn cached_local_usage(provider_id: &str) -> Option<ProviderLocalUsageSummary> {
     cached_provider_local_usage_summary(provider_id)
 }
