@@ -1766,3 +1766,20 @@ QuotaArchiveTitle = Usage history
 QuotaArchiveHelp = Saved on this PC for 90 days and shared with paired devices. Shows recorded observations; older data may be summarized daily. Missing periods are not estimated.
 QuotaArchiveSevenDays = 7 days
 QuotaArchiveThirtyDays = 30 days
+
+# Desktop connections and native platform support
+DesktopPeerTitle = 다른 PC에서 받기
+DesktopPeerHelp = 공유할 Windows 또는 Mac에서 공유를 켜고 연결 코드를 복사하세요. 여기에 붙여넣으면 LAN 또는 Tailscale로 사용량, 기록, 비용을 받습니다. 출구 노드는 필요 없으며 이 PC도 자체 데이터를 계속 공유할 수 있습니다.
+DesktopPeerSource = 표시할 데이터
+DesktopPeerLocal = 이 PC
+DesktopPeerName = PC 이름
+DesktopPeerCode = 연결 코드
+DesktopPeerConnect = 저장 후 연결
+DesktopPeerRemove = PC 삭제
+DesktopPeerConnected = 연결됨
+DesktopPeerReceiving = 수신 중…
+DesktopPeerOffline = 공유 PC 대기 중
+DesktopPeerEmpty = 저장된 PC가 없습니다.
+DesktopPeerDataHelp = 사용량, 기록, 비용은 선택한 PC에서 가져오며 해당 PC의 집계 기간과 시간대를 사용합니다. 프로젝트 및 대화 세부 정보는 공유되지 않습니다. 로그인과 수집 설정은 이 PC에 적용됩니다. 로컬 데이터는 이 PC를 선택하세요.
+NativeFeatureWindowsOnly = 이 기본 연동 기능은 현재 Windows에서만 사용할 수 있습니다.
+MacManualUpdatesHelper = 이 앱의 릴리스 페이지에서 Mac DMG를 받고 앱을 종료한 다음 Applications의 앱을 교체하세요.

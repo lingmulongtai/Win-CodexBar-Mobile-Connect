@@ -1766,3 +1766,20 @@ QuotaArchiveTitle = Usage history
 QuotaArchiveHelp = Saved on this PC for 90 days and shared with paired devices. Shows recorded observations; older data may be summarized daily. Missing periods are not estimated.
 QuotaArchiveSevenDays = 7 days
 QuotaArchiveThirtyDays = 30 days
+
+# Desktop connections and native platform support
+DesktopPeerTitle = Recibir de otra PC
+DesktopPeerHelp = Activa el uso compartido en la PC Windows o Mac y copia su código. Pégalo aquí para recibir uso, historial y gastos por LAN o Tailscale sin nodo de salida. Esta PC puede seguir compartiendo sus propios datos.
+DesktopPeerSource = Origen de los datos
+DesktopPeerLocal = Esta PC
+DesktopPeerName = Nombre de la PC
+DesktopPeerCode = Código de conexión
+DesktopPeerConnect = Guardar y conectar
+DesktopPeerRemove = Quitar PC
+DesktopPeerConnected = Conectado
+DesktopPeerReceiving = Recibiendo…
+DesktopPeerOffline = Esperando a la PC compartida
+DesktopPeerEmpty = No hay PCs guardadas.
+DesktopPeerDataHelp = El uso, historial y gastos provienen de la PC seleccionada y usan su periodo y zona horaria. No se comparten detalles de proyectos ni conversaciones. El inicio de sesión y la recopilación se aplican a esta PC; selecciónala para ver los datos locales.
+NativeFeatureWindowsOnly = Esta integración nativa está disponible actualmente solo en Windows.
+MacManualUpdatesHelper = Descarga el DMG de Mac desde las versiones de esta aplicación, cierra la app y reemplázala en Applications.

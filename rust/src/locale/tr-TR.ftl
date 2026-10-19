@@ -1767,3 +1767,20 @@ QuotaArchiveTitle = Usage history
 QuotaArchiveHelp = Saved on this PC for 90 days and shared with paired devices. Shows recorded observations; older data may be summarized daily. Missing periods are not estimated.
 QuotaArchiveSevenDays = 7 days
 QuotaArchiveThirtyDays = 30 days
+
+# Desktop connections and native platform support
+DesktopPeerTitle = Başka bir PC’den al
+DesktopPeerHelp = Windows veya Mac bilgisayarda paylaşımı açıp bağlantı kodunu kopyalayın. LAN veya Tailscale üzerinden kullanım, geçmiş ve harcamaları almak için buraya yapıştırın. Çıkış düğümü gerekmez; bu PC kendi verilerini paylaşmaya devam edebilir.
+DesktopPeerSource = Veri kaynağı
+DesktopPeerLocal = Bu PC
+DesktopPeerName = PC adı
+DesktopPeerCode = Bağlantı kodu
+DesktopPeerConnect = Kaydet ve bağlan
+DesktopPeerRemove = PC’yi kaldır
+DesktopPeerConnected = Bağlandı
+DesktopPeerReceiving = Alınıyor…
+DesktopPeerOffline = Paylaşan PC bekleniyor
+DesktopPeerEmpty = Henüz kayıtlı PC yok.
+DesktopPeerDataHelp = Kullanım, geçmiş ve harcamalar seçili PC’den gelir; o PC’nin dönemi ve saat dilimi kullanılır. Proje ve sohbet ayrıntıları paylaşılmaz. Oturum açma ve veri toplama ayarları bu PC’ye aittir; yerel veriler için bu PC’yi seçin.
+NativeFeatureWindowsOnly = Bu yerel entegrasyon şu anda yalnızca Windows’ta kullanılabilir.
+MacManualUpdatesHelper = Uygulamanın sürümler sayfasından Mac DMG dosyasını indirin, uygulamayı kapatın ve Applications içindeki uygulamayı değiştirin.
