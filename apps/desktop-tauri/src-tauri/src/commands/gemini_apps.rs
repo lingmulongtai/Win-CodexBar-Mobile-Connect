@@ -34,7 +34,7 @@ pub async fn connect_gemini_apps(app: tauri::AppHandle) -> Result<(), String> {
     let header = GeminiAppsProvider::verify_session(&header, FetchContext::default().web_timeout)
         .await
         .map_err(|error| codexbar::logging::safe_error_message(&error))?;
-    replace(&app, &header)
+    replace(&app, &header).await
 }
 
 #[tauri::command]
@@ -72,34 +72,34 @@ pub async fn connect_gemini_apps_from_browser(
     let header = GeminiAppsProvider::verify_session(&header, FetchContext::default().web_timeout)
         .await
         .map_err(|error| codexbar::logging::safe_error_message(&error))?;
-    replace(&app, &header)
+    replace(&app, &header).await
 }
 
 #[tauri::command]
 pub async fn disconnect_gemini_apps(app: tauri::AppHandle) -> Result<(), String> {
-    revoke(&app)
+    revoke(&app).await
 }
 
-pub(super) fn revoke(app: &tauri::AppHandle) -> Result<(), String> {
+pub(super) async fn revoke(app: &tauri::AppHandle) -> Result<(), String> {
     let _mutation = MUTATION
         .try_lock()
         .map_err(|_| "Gemini Apps connection is already in progress")?;
     // Revoke first, even if the browser's subsequent cleanup fails.
     changed(app, None)?;
-    browser::clear(app)
+    browser::clear(app).await
 }
 
-fn replace(app: &tauri::AppHandle, header: &str) -> Result<(), String> {
+async fn replace(app: &tauri::AppHandle, header: &str) -> Result<(), String> {
     let old = ManualCookies::load();
     let old = browser::selection(old.get("geminiapps"));
     changed(app, Some(header))?;
     // Only retire the previous profile once its replacement has been saved.
     if let Some(old) = old.filter(|id| Some(*id) != browser::selection(Some(header)))
-        && browser::retire(app, old).is_err()
+        && browser::retire(app, old).await.is_err()
     {
         tracing::warn!("Could not clear the previous Gemini browser; disconnect can retry cleanup");
     }
-    if browser::selection(Some(header)).is_none() && browser::cancel(app).is_err() {
+    if browser::selection(Some(header)).is_none() && browser::cancel(app).await.is_err() {
         tracing::warn!("Could not clear unfinished Gemini sign-in; disconnect can retry cleanup");
     }
     Ok(())
@@ -139,7 +139,7 @@ pub async fn finish_gemini_browser(
         .try_lock()
         .map_err(|_| "Gemini Apps connection is already in progress")?;
     let marker = browser::finish(&app).await?;
-    replace(&app, &marker)?;
+    replace(&app, &marker).await?;
     browser::complete(&app);
     Ok(())
 }
@@ -153,5 +153,5 @@ pub async fn cancel_gemini_browser(
     let _mutation = MUTATION
         .try_lock()
         .map_err(|_| "Gemini Apps connection is already in progress")?;
-    browser::cancel(&app)
+    browser::cancel(&app).await
 }

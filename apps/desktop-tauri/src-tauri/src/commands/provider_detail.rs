@@ -265,7 +265,7 @@ pub async fn revoke_provider_credentials(
     keys.save().map_err(|e| e.to_string())?;
 
     if id == ProviderId::GeminiApps {
-        super::gemini_apps::revoke(&app)?;
+        super::gemini_apps::revoke(&app).await?;
     } else {
         let mut cookies = ManualCookies::load();
         cookies.remove(provider_id);
