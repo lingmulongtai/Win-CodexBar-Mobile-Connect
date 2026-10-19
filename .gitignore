@@ -137,3 +137,8 @@ clippy_*.txt
 fmt_*.txt
 rust_test*.txt
 tauri_test*.txt
+
+# Owned fork release notes
+!/docs/releases/
+/docs/releases/*
+!/docs/releases/v0.72.0.md
