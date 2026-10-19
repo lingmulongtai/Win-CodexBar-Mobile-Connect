@@ -4,6 +4,7 @@ const api = vi.hoisted(() => ({ getMobileSharingStatus: vi.fn(), getMobileNetwor
 const locale = vi.hoisted(() => ({ t: (key: string) => key }));
 vi.mock("../../../lib/tauri", () => api);
 vi.mock("../../../hooks/useLocale", () => ({ useLocale: () => locale }));
+vi.mock("./DesktopPeerSettings", () => ({ default: () => null }));
 import MobileSharingSettings from "./MobileSharingSettings";
 const running = { enabled: true, running: true, address: "192.168.1.10", port: 43825, error: null, allowRemoteSettings:false };
 describe("Android sharing", () => {
