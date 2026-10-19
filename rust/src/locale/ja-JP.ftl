@@ -1782,3 +1782,5 @@ QuotaArchiveSevenDays = 7日
 QuotaArchiveThirtyDays = 30日
 
 NativeFeatureWindowsOnly = この機能は現在Windows版のみ対応しています。
+
+MacManualUpdatesHelper = このアプリのリリースページからMac用DMGをダウンロードし、アプリを終了してApplications内のアプリを置き換えてください。

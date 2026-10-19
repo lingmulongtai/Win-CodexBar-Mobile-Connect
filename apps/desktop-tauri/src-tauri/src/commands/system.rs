@@ -4,7 +4,14 @@ use super::*;
 pub fn get_app_info() -> AppInfoBridge {
     let settings = Settings::load();
     AppInfoBridge {
-        name: "Win-CodexBar + Mobile Connect".to_string(),
+        name: if cfg!(target_os = "macos") {
+            "CodexBar + Mobile Connect"
+        } else {
+            "Win-CodexBar + Mobile Connect"
+        }
+        .to_string(),
+        repository_url: format!("https://github.com/{}", codexbar::updater::GITHUB_REPO),
+        supports_automatic_updates: codexbar::updater::supports_automatic_updates(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         build_number: option_env!("BUILD_NUMBER").unwrap_or("dev").to_string(),
         build_date: option_env!("CODEXBAR_BUILD_DATE").map(str::to_string),

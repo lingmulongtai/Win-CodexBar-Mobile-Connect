@@ -37,6 +37,8 @@ pub struct ApiKeyProviderInfoBridge {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfoBridge {
+    pub repository_url: String,
+    pub supports_automatic_updates: bool,
     pub name: String,
     pub version: String,
     pub build_number: String,

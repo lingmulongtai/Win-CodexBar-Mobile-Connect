@@ -1294,6 +1294,8 @@ export interface DetectedBrowserBridge {
 }
 
 export interface AppInfoBridge {
+  repositoryUrl?: string;
+  supportsAutomaticUpdates?: boolean;
   name: string;
   version: string;
   buildNumber: string;

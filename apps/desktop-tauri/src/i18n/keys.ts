@@ -812,6 +812,7 @@ export const ALL_LOCALE_KEYS = [
   "LowPowerMode",
   "LowPowerModeHelper",
   "NativeFeatureWindowsOnly",
+  "MacManualUpdatesHelper",
   "LowPowerModeOff",
   "LowPowerModeOn",
   "LowPowerModeAutomatic",
