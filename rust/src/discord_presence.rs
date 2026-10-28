@@ -6,10 +6,8 @@ use serde_json::{Value, json};
 
 mod metadata;
 
-/// Immutable public fork asset, proxied by Discord for the activity image.
-const APP_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/9ea38f9b6e815ea1d28827ee6423bf4350abe34d/rust/assets/icons/CodexBar-app-icon.png";
-const CODEX_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/9ea38f9b6e815ea1d28827ee6423bf4350abe34d/apps/desktop-tauri/src/assets/brand-icons/Brand-ProviderIcon-codex.png";
-const CLAUDE_ICON_URL: &str = "https://claude.ai/images/claude_app_icon.png";
+/// User-approved public, animated idle loop derived from the selected Codex pet.
+const PET_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/636c721291e399e6b73fd249ad68af45ab4d3976/rust/assets/discord/pets/maomao-idle.webp";
 const REPOSITORY_URL: &str = "https://github.com/lingmulongtai/Win-CodexBar-Mobile-Connect";
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -89,7 +87,7 @@ pub fn idle_activity() -> Value {
     json!({
         "details": "📊 Monitoring AI usage",
         "status_display_type": 2,
-        "assets": {"large_image": APP_ICON_URL, "large_text": "Win-CodexBar + Mobile Connect"},
+        "assets": {"large_image": PET_ICON_URL, "large_text": "Win-CodexBar + Mobile Connect"},
         "buttons": [{"label": "View on GitHub", "url": REPOSITORY_URL}]
     })
 }
@@ -100,13 +98,13 @@ pub fn idle_activity_with_usage(
 ) -> Value {
     let mut activity = idle_activity();
     if let Some(provider) = provider {
-        let (name, icon) = match provider {
-            AgentSessionProvider::Codex => ("Codex", CODEX_ICON_URL),
-            AgentSessionProvider::Claude => ("Claude Code", CLAUDE_ICON_URL),
-            AgentSessionProvider::Pi => ("Pi / OMP", APP_ICON_URL),
+        let name = match provider {
+            AgentSessionProvider::Codex => "Codex",
+            AgentSessionProvider::Claude => "Claude Code",
+            AgentSessionProvider::Pi => "Pi / OMP",
         };
         activity["details"] = json!(format!("💤 {name} · idle"));
-        activity["assets"] = json!({"large_image": icon, "large_text": name});
+        activity["assets"] = json!({"large_image": PET_ICON_URL, "large_text": name});
     }
     if let Some(p) = periods {
         activity["state"] = json!(format!(
@@ -189,15 +187,10 @@ pub fn activity_with_usage(
         (_, Some(false)) => details.push_str(" · Standard"),
         _ => {}
     }
-    let icon = match session.provider {
-        AgentSessionProvider::Codex => CODEX_ICON_URL,
-        AgentSessionProvider::Claude => CLAUDE_ICON_URL,
-        AgentSessionProvider::Pi => APP_ICON_URL,
-    };
     let mut activity = json!({
         "details": details,
         "status_display_type": 2,
-        "assets": {"large_image": icon, "large_text": name},
+        "assets": {"large_image": PET_ICON_URL, "large_text": name},
         "buttons": [{"label": "View on GitHub", "url": REPOSITORY_URL}]
     });
     let mut labels = Vec::new();
@@ -254,6 +247,7 @@ mod tests {
     fn idle_activity_does_not_claim_a_session_is_active() {
         let activity = idle_activity();
         assert_eq!(activity["details"], "📊 Monitoring AI usage");
+        assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
         assert!(activity.get("timestamps").is_none());
     }
 
@@ -350,12 +344,7 @@ mod tests {
         ] {
             let activity = activity_for_sessions(&[session(provider, now)], now).unwrap();
             assert_eq!(activity["details"], format!("⚡ Using {expected}"));
-            let icon = match provider {
-                AgentSessionProvider::Codex => CODEX_ICON_URL,
-                AgentSessionProvider::Claude => CLAUDE_ICON_URL,
-                AgentSessionProvider::Pi => APP_ICON_URL,
-            };
-            assert_eq!(activity["assets"]["large_image"], icon);
+            assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
             assert_eq!(activity["assets"]["large_text"], expected);
             assert_eq!(activity["status_display_type"], 2);
             assert_eq!(activity["buttons"][0]["url"], REPOSITORY_URL);
