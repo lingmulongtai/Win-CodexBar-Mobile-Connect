@@ -176,10 +176,19 @@ pub fn activity_with_usage(
             )
         })
         .unwrap_or_default();
-    let details = meta.model.map_or_else(
+    let mut details = meta.model.map_or_else(
         || format!("⚡ Using {name}"),
         |model| format!("⚡ {name} · {model}"),
     );
+    if let Some(effort) = meta.effort {
+        details.push_str(&format!(" ({effort})"));
+    }
+    match (session.provider, meta.fast) {
+        (AgentSessionProvider::Codex, Some(true)) => details.push_str(" · 🚀 Fast requested"),
+        (AgentSessionProvider::Claude, Some(true)) => details.push_str(" · 🚀 Fast"),
+        (_, Some(false)) => details.push_str(" · Standard"),
+        _ => {}
+    }
     let icon = match session.provider {
         AgentSessionProvider::Codex => CODEX_ICON_URL,
         AgentSessionProvider::Claude => CLAUDE_ICON_URL,
@@ -309,6 +318,26 @@ mod tests {
         assert_eq!(activity["timestamps"]["start"], 1767229200);
         assert_eq!(activity["buttons"][0]["url"], REPOSITORY_URL);
         assert!(!activity.to_string().contains("private-project"));
+    }
+
+    #[test]
+    fn codex_effort_and_requested_fast_mode_are_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        std::fs::write(&path, concat!(
+            "{\"type\":\"session_meta\",\"timestamp\":\"2026-01-01T01:00:00Z\",\"payload\":{\"id\":\"s\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-6.1\",\"reasoning_effort\":\"high\",\"service_tier\":\"priority\"}}}\n"
+        )).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut s = session(AgentSessionProvider::Codex, now);
+        s.transcript_path = Some(path.to_string_lossy().to_string());
+        let activity = activity_with_usage(&[s], now, false, None).unwrap();
+        assert_eq!(
+            activity["details"],
+            "⚡ Codex · gpt-6.1 (High) · 🚀 Fast requested"
+        );
     }
 
     #[test]

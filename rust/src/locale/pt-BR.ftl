@@ -1790,4 +1790,4 @@ NativeFeatureWindowsOnly = Esta integração nativa está disponível atualmente
 MacManualUpdatesHelper = Baixe o DMG do Mac nas versões deste aplicativo, feche o app e substitua-o em Applications.
 
 DiscordPresenceLabel = Discord Rich Presence
-DiscordPresenceHelper = Mostra um status persistente no Discord enquanto o aplicativo está aberto. Pode compartilhar serviço, modelo, tempo decorrido e totais locais de tokens, mas não projetos, caminhos ou conversas. Tokens exigem rastreamento de custos e a detecção é aproximada.
+DiscordPresenceHelper = Mostra um status persistente no Discord com serviço, modelo, esforço, velocidade, tempo decorrido e totais locais de tokens quando disponíveis. Não compartilha projetos, caminhos nem conversas. Tokens exigem rastreamento de custos; a detecção é aproximada.

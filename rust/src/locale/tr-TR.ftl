@@ -1786,4 +1786,4 @@ NativeFeatureWindowsOnly = Bu yerel entegrasyon şu anda yalnızca Windows’ta 
 MacManualUpdatesHelper = Uygulamanın sürümler sayfasından Mac DMG dosyasını indirin, uygulamayı kapatın ve Applications içindeki uygulamayı değiştirin.
 
 DiscordPresenceLabel = Discord Rich Presence
-DiscordPresenceHelper = Uygulama çalışırken Discord uygulamasında durum gösterir. Hizmet, model, oturum süresi ve yerel token toplamları paylaşılabilir; proje adları, yollar ve konuşmalar paylaşılmaz. Tokenlar için maliyet takibi gerekir; algılama yaklaşıktır.
+DiscordPresenceHelper = Uygulama çalışırken Discord durumunda kullanılabilir hizmet, model, akıl yürütme düzeyi, hız, oturum süresi ve yerel token toplamları gösterilir. Proje adları, yollar ve konuşmalar paylaşılmaz. Tokenlar için maliyet takibi gerekir; algılama yaklaşıktır.
