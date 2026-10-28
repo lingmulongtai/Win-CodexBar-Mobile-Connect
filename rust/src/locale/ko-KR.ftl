@@ -1785,4 +1785,4 @@ NativeFeatureWindowsOnly = 이 기본 연동 기능은 현재 Windows에서만 �
 MacManualUpdatesHelper = 이 앱의 릴리스 페이지에서 Mac DMG를 받고 앱을 종료한 다음 Applications의 앱을 교체하세요.
 
 DiscordPresenceLabel = Discord Rich Presence
-DiscordPresenceHelper = Discord 데스크톱 앱에 로컬 Codex, Claude Code 또는 Pi/OMP의 최근 활동을 표시합니다. 서비스 이름만 공유하며 프로젝트 이름, 경로, 대화는 전송하지 않습니다. 감지는 추정치이며 표시가 사라지기까지 몇 분 걸릴 수 있습니다.
+DiscordPresenceHelper = 앱이 실행되는 동안 Discord에 상태를 표시합니다. 서비스, 모델, 세션 경과 시간 및 로컬 토큰 합계를 공유할 수 있지만 프로젝트 이름, 경로, 대화는 공유하지 않습니다. 토큰에는 비용 추적이 필요하며 감지는 추정치입니다.

@@ -1,10 +1,10 @@
-//! Opt-in local Discord RPC. No provider data or conversation content leaves
-//! this process: the payload contains a fixed provider label and public icon.
+//! Opt-in local Discord RPC. Public activity may include service, model,
+//! elapsed time and token counts; conversation content and paths stay local.
 #[cfg(windows)]
 mod windows {
     use std::io;
-    use std::sync::OnceLock;
-    use std::time::Duration;
+    use std::sync::{Arc, OnceLock};
+    use std::time::{Duration, Instant};
 
     use codexbar::agent_sessions::LocalAgentSessionScanner;
     use serde_json::{Value, json};
@@ -16,6 +16,7 @@ mod windows {
     const INTERVAL: Duration = Duration::from_secs(20);
     const IO_TIMEOUT: Duration = Duration::from_secs(5);
     const MAX_FRAME: usize = 64 * 1024;
+    const USAGE_INTERVAL: Duration = Duration::from_secs(300);
     static SETTINGS: OnceLock<watch::Sender<bool>> = OnceLock::new();
 
     pub fn install(enabled: bool) {
@@ -120,8 +121,19 @@ mod windows {
 
     async fn run(mut enabled: watch::Receiver<bool>) {
         let mut stream: Option<NamedPipeClient> = None;
+        let mut last_provider = None;
+        let mut usage = (None, None);
+        let mut usage_task: Option<tokio::task::JoinHandle<_>> = None;
+        let mut usage_refreshed: Option<Instant> = None;
+        let mut usage_day = None;
+        let mut usage_task_valid = false;
+        let metadata_slot = Arc::new(tokio::sync::Semaphore::new(1));
         loop {
             if !*enabled.borrow_and_update() {
+                usage_task_valid = false;
+                usage = (None, None);
+                usage_refreshed = None;
+                usage_day = None;
                 if let Some(mut current) = stream.take() {
                     let _result = set_activity(&mut current, None).await;
                 }
@@ -136,31 +148,91 @@ mod windows {
                 changed = enabled.changed() => { if changed.is_err() { break; } continue; },
                 result = scanner.scan_for_presence() => result,
             };
-            let activity = codexbar::discord_presence::activity_for_sessions(
-                &scan.sessions,
-                chrono::Utc::now(),
-            );
-            if activity.is_none() {
-                if let Some(mut current) = stream.take() {
-                    let _result = set_activity(&mut current, None).await;
-                }
+            let now = chrono::Utc::now();
+            let tokens_enabled = codexbar::settings::Settings::load().cost_usage_enabled;
+            let today = codexbar::cost_reporting_period::cost_bucket_zone().date(now);
+            if usage_day.is_some_and(|day| day != today) {
+                usage_task_valid = false;
+                usage = (None, None);
+                usage_refreshed = None;
+            }
+            usage_day = Some(today);
+            if !tokens_enabled {
+                usage_task_valid = false;
+                usage = (None, None);
+                usage_refreshed = None;
             } else {
-                if stream.is_none() {
-                    tokio::select! {
-                        biased;
-                        changed = enabled.changed() => { if changed.is_err() { break; } continue; },
-                        result = connect() => { stream = result.ok(); }
+                if usage_task.as_ref().is_some_and(|task| task.is_finished()) {
+                    if let Some(task) = usage_task.take() {
+                        let completed = task.await.unwrap_or((None, None));
+                        if usage_task_valid {
+                            usage = completed;
+                            usage_refreshed = Some(Instant::now());
+                        }
                     }
                 }
-                if let Some(current) = stream.as_mut() {
-                    let result = tokio::select! {
-                        biased;
-                        changed = enabled.changed() => { if changed.is_err() { break; } None },
-                        result = set_activity(current, activity) => Some(result),
-                    };
-                    if result.is_none() || result.is_some_and(|result| result.is_err()) {
-                        stream = None;
-                    }
+                if usage_task.is_none()
+                    && usage_refreshed.is_none_or(|time| time.elapsed() >= USAGE_INTERVAL)
+                {
+                    usage_task = Some(tokio::task::spawn_blocking(move || {
+                        use codexbar::agent_sessions::AgentSessionProvider::{Claude, Codex};
+                        (
+                            codexbar::discord_presence::usage_periods(Codex, now),
+                            codexbar::discord_presence::usage_periods(Claude, now),
+                        )
+                    }));
+                    usage_task_valid = true;
+                }
+            }
+            let provider = codexbar::discord_presence::current_provider(&scan.sessions, now);
+            if provider.is_some() {
+                last_provider = provider;
+            }
+            use codexbar::agent_sessions::AgentSessionProvider::{Claude, Codex};
+            // On a fresh start with only one usable history, identify it
+            // instead of silently hiding its calendar totals.
+            let selected = provider.or(last_provider).or_else(|| match usage {
+                (Some(_), None) => Some(Codex),
+                (None, Some(_)) => Some(Claude),
+                _ => None,
+            });
+            let periods = match selected {
+                Some(Codex) => usage.0,
+                Some(Claude) => usage.1,
+                None => usage.0.zip(usage.1).and_then(|(a, b)| {
+                    Some(codexbar::discord_presence::UsagePeriods {
+                        today: a.today.checked_add(b.today)?,
+                        week: a.week.checked_add(b.week)?,
+                        month: a.month.checked_add(b.month)?,
+                    })
+                }),
+                _ => None,
+            };
+            let activity = if let Ok(permit) = metadata_slot.clone().try_acquire_owned() {
+                tokio::select! {
+                    biased;
+                    changed = enabled.changed() => { if changed.is_err() { break; } continue; },
+                    result = tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        codexbar::discord_presence::activity_with_usage(&scan.sessions, now, tokens_enabled, periods)
+                    }) => result.ok().flatten(),
+                }
+            } else { None }.unwrap_or_else(|| codexbar::discord_presence::idle_activity_with_usage(selected, periods));
+            if stream.is_none() {
+                tokio::select! {
+                    biased;
+                    changed = enabled.changed() => { if changed.is_err() { break; } continue; },
+                    result = connect() => { stream = result.ok(); }
+                }
+            }
+            if let Some(current) = stream.as_mut() {
+                let result = tokio::select! {
+                    biased;
+                    changed = enabled.changed() => { if changed.is_err() { break; } None },
+                    result = set_activity(current, Some(activity)) => Some(result),
+                };
+                if result.is_none() || result.is_some_and(|result| result.is_err()) {
+                    stream = None;
                 }
             }
             tokio::select! {
