@@ -51,6 +51,7 @@ describe("MenuTab layout", () => {
       "MenuUsageSectionTitle",
       "MenuWindowsSectionTitle",
       "MenuContentSectionTitle",
+      "DiscordPresenceLabel",
       "AgentSessionsTitle",
       "MenuCostSummarySectionTitle",
     ]);
@@ -193,6 +194,16 @@ describe("MenuTab Content section", () => {
     expect(
       screen.getByRole("checkbox", { name: "HighlightMenuCardsOnHoverLabel" }),
     ).not.toBeChecked();
+  });
+});
+
+describe("Discord Rich Presence", () => {
+  it("is off by default and saves an explicit opt-in", () => {
+    const { set } = renderTab();
+    const toggle = screen.getByRole("checkbox", { name: "DiscordPresenceLabel" });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(set).toHaveBeenCalledWith({ discordPresenceEnabled: true });
   });
 });
 

@@ -1783,3 +1783,6 @@ DesktopPeerEmpty = 저장된 PC가 없습니다.
 DesktopPeerDataHelp = 사용량, 기록, 비용은 선택한 PC에서 가져오며 해당 PC의 집계 기간과 시간대를 사용합니다. 프로젝트 및 대화 세부 정보는 공유되지 않습니다. 로그인과 수집 설정은 이 PC에 적용됩니다. 로컬 데이터는 이 PC를 선택하세요.
 NativeFeatureWindowsOnly = 이 기본 연동 기능은 현재 Windows에서만 사용할 수 있습니다.
 MacManualUpdatesHelper = 이 앱의 릴리스 페이지에서 Mac DMG를 받고 앱을 종료한 다음 Applications의 앱을 교체하세요.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Discord 데스크톱 앱에 로컬 Codex, Claude Code 또는 Pi/OMP의 최근 활동을 표시합니다. 서비스 이름만 공유하며 프로젝트 이름, 경로, 대화는 전송하지 않습니다. 감지는 추정치이며 표시가 사라지기까지 몇 분 걸릴 수 있습니다.

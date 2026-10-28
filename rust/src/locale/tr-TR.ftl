@@ -1784,3 +1784,6 @@ DesktopPeerEmpty = Henüz kayıtlı PC yok.
 DesktopPeerDataHelp = Kullanım, geçmiş ve harcamalar seçili PC’den gelir; o PC’nin dönemi ve saat dilimi kullanılır. Proje ve sohbet ayrıntıları paylaşılmaz. Oturum açma ve veri toplama ayarları bu PC’ye aittir; yerel veriler için bu PC’yi seçin.
 NativeFeatureWindowsOnly = Bu yerel entegrasyon şu anda yalnızca Windows’ta kullanılabilir.
 MacManualUpdatesHelper = Uygulamanın sürümler sayfasından Mac DMG dosyasını indirin, uygulamayı kapatın ve Applications içindeki uygulamayı değiştirin.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Discord masaüstü uygulamasında yerel Codex, Claude Code veya Pi/OMP etkinliğini gösterir. Yalnızca hizmet adı paylaşılır; proje adları, yollar ve konuşmalar gönderilmez. Algılama yaklaşıktır ve durumun kaldırılması birkaç dakika sürebilir.

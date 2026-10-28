@@ -1784,3 +1784,6 @@ DesktopPeerEmpty = 尚未儲存電腦。
 DesktopPeerDataHelp = 用量、歷史與費用來自所選電腦，採用該電腦的統計週期與時區。不共享專案及對話詳情。登入和收集設定僅套用於本機；選擇本機可檢視本地資料。
 NativeFeatureWindowsOnly = 此原生整合功能目前僅支援Windows。
 MacManualUpdatesHelper = 從本應用的發行頁面下載Mac DMG，結束應用程式，再取代Applications中的應用程式。
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = 在 Discord 桌面應用程式中顯示本機 Codex、Claude Code 或 Pi/OMP 的近期活動。只分享服務名稱，不傳送專案名稱、路徑或對話。偵測為估算，清除顯示可能需要幾分鐘。

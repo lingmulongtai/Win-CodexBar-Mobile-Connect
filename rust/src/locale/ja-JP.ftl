@@ -1784,3 +1784,6 @@ QuotaArchiveThirtyDays = 30日
 NativeFeatureWindowsOnly = この機能は現在Windows版のみ対応しています。
 
 MacManualUpdatesHelper = このアプリのリリースページからMac用DMGをダウンロードし、アプリを終了してApplications内のアプリを置き換えてください。
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = ローカルの Codex、Claude Code、Pi/OMP の最近の活動を Discord デスクトップアプリに表示します。共有するのはサービス名のみで、プロジェクト名・パス・会話は送信しません。検出は推定で、表示が消えるまで数分かかる場合があります。

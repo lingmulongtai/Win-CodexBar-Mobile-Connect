@@ -342,6 +342,10 @@ pub struct Settings {
     #[serde(default)]
     pub agent_sessions_enabled: bool,
 
+    /// Opt-in local Discord activity; never included in portable preferences.
+    #[serde(default)]
+    pub discord_presence_enabled: bool,
+
     /// Keep the system awake (no idle sleep) while a local agent session is live.
     #[serde(default)]
     pub stay_awake_enabled: bool,
@@ -801,6 +805,7 @@ impl Default for Settings {
             codex_custom_sessions_dirs: Vec::new(),
             antigravity_additional_profile_homes: Vec::new(),
             agent_sessions_enabled: false,
+            discord_presence_enabled: false,
             stay_awake_enabled: false,
             agent_session_ssh_hosts: Vec::new(),
             hooks_enabled: false,
