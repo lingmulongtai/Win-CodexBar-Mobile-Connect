@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 
 mod metadata;
 
-/// User-approved public, animated idle loop derived from the selected Codex pet.
-const PET_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/636c721291e399e6b73fd249ad68af45ab4d3976/rust/assets/discord/pets/maomao-idle.webp";
+/// User-approved public GIF of the selected Codex pet's idle animation.
+const PET_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/d40229141dc33ca54f86aa2d6eb6b42c8667ee7e/rust/assets/discord/pets/maomao-idle.gif";
 const REPOSITORY_URL: &str = "https://github.com/lingmulongtai/Win-CodexBar-Mobile-Connect";
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -248,6 +248,7 @@ mod tests {
         let activity = idle_activity();
         assert_eq!(activity["details"], "📊 Monitoring AI usage");
         assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+        assert!(PET_ICON_URL.ends_with(".gif"));
         assert!(activity.get("timestamps").is_none());
     }
 
