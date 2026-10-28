@@ -64,6 +64,7 @@ nul
 /.local/
 # Docs children ignored generally; ADRs are product docs and stay trackable
 /docs/*
+!/docs/discord-rich-presence.md
 !/docs/prometheus/
 !/docs/grafana/
 !/docs/adr/
