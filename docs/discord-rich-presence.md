@@ -18,10 +18,12 @@ A further read-only fetch before the local PC update checked upstream `89cf121ad
 
 On 2026-10-29, fetched upstream `3f14abb1dc74130bd1a3d29a0703f681d065ca88`. The new commit adds configurable lead times to predictive pace notifications, not session discovery or Discord presence. Its changes were deferred because the notification area is outside this task; no upstream changes were incorporated.
 
-A subsequent fetch on the same date again checked upstream `3f14abb1dc74130bd1a3d29a0703f681d065ca88`, with no additional commits to integrate. The user-approved animated pet asset is published separately on the fork branch `codex/discord-pet-asset-20261029` at `636c721291e399e6b73fd249ad68af45ab4d3976`.
+A subsequent fetch on the same date again checked upstream `3f14abb1dc74130bd1a3d29a0703f681d065ca88`, with no additional commits to integrate. The user-approved animated pet assets are published separately on the fork branch `codex/discord-pet-asset-20261029`; the GIF is at `d40229141dc33ca54f86aa2d6eb6b42c8667ee7e`.
 
 ## Validation
 
 The local Windows test run passed 34 agent-session tests, four activity-mapping tests, four desktop IPC/settings tests, all 1,359 frontend tests, the frontend build and locale check. A live Discord desktop IPC handshake accepted the supplied application ID, activity and icon URL, and acknowledged a clear request. This is protocol evidence; it does not establish visual display or end-to-end detection of every Claude installation.
+
+The user reported that the animated WebP appeared static in Discord. A six-frame GIF with the same timing was prepared and its published bytes and IPC acceptance were verified. Discord's image proxy returned HTTP 403 to an automated request; GIF playback in the actual client remains unverified, and changing formats is not proof that the original symptom is resolved.
 
 References: [Codex Discord Rich Presence](https://github.com/xt0n1-t3ch/Codex-Discord-Rich-Presence), [claude-rpc](https://github.com/rar-file/claude-rpc), and [Discord RPC documentation](https://docs.discord.com/developers/topics/rpc).
