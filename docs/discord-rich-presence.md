@@ -12,6 +12,8 @@ On 2026-10-28, fetched the read-only `nesszer/Win-CodexBar` default branch at `3
 
 A further read-only fetch before the local PC update checked upstream `89cf121ada8c345b2ac1056439cec6c407fd21dc`. Its three newer commits concern tray rendering, a Grok ACP test, and changelog entries, not the Discord or local-session path, so none was incorporated in this local update. The existing fork features and release ownership remain unchanged.
 
+On 2026-10-29, fetched upstream `3f14abb1dc74130bd1a3d29a0703f681d065ca88`. The new commit adds configurable lead times to predictive pace notifications, not session discovery or Discord presence. Its changes were deferred because the notification area is outside this task; no upstream changes were incorporated.
+
 ## Validation
 
 The local Windows test run passed 34 agent-session tests, four activity-mapping tests, four desktop IPC/settings tests, all 1,359 frontend tests, the frontend build and locale check. A live Discord desktop IPC handshake accepted the supplied application ID, activity and icon URL, and acknowledged a clear request. This is protocol evidence; it does not establish visual display or end-to-end detection of every Claude installation.
