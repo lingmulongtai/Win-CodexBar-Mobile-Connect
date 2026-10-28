@@ -1729,6 +1729,10 @@ fn scan_claude_file_for_daily_tokens(
             }
         },
     );
+    // Preliminary message-start rows are superseded by completed rows with
+    // the same request key. They must not make an otherwise complete token
+    // history permanently appear unavailable.
+    result.incomplete_requests = incomplete.resolve(seen).total;
     result.aggregation_failures = result
         .aggregation_failures
         .saturating_add(aggregation_failures);
