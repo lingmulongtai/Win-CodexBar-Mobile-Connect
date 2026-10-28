@@ -141,15 +141,14 @@ pub fn current_session(sessions: &[AgentSession], now: DateTime<Utc>) -> Option<
         {
             return false;
         }
-        if stale_reads >= 16 {
+        let Some(path) = session.transcript_path.as_deref() else {
+            return false;
+        };
+        if stale_reads >= 64 {
             return false;
         }
         stale_reads += 1;
-        let Some(started) = session
-            .transcript_path
-            .as_deref()
-            .and_then(|path| metadata::codex_open_turn(std::path::Path::new(path), now))
-        else {
+        let Some(started) = metadata::codex_open_turn(std::path::Path::new(path), now) else {
             return false;
         };
         // Process-to-transcript correlation is approximate. Require a

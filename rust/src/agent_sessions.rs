@@ -7,7 +7,10 @@ use std::fs::File;
 use std::future::Future;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+static PRESENCE_SCAN_SLOT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -339,6 +342,7 @@ pub struct AgentSessionDiscovery {
 }
 
 mod claude_desktop;
+mod codex_catalog;
 mod focus;
 mod native_processes;
 mod parsers;
@@ -387,6 +391,25 @@ impl LocalAgentSessionScanner {
 
     async fn scan_internal(&self, include_claude_files: bool) -> AgentSessionHostResult {
         let host = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "localhost".to_string());
+        // Hold the slot across process discovery and the blocking scan so a
+        // queued scan cannot use a process snapshot taken before its wait.
+        let presence_permit = if include_claude_files {
+            let slot = PRESENCE_SCAN_SLOT
+                .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+                .clone();
+            match slot.acquire_owned().await {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    return AgentSessionHostResult {
+                        host,
+                        sessions: Vec::new(),
+                        error: Some("Presence scan unavailable".to_string()),
+                    };
+                }
+            }
+        } else {
+            None
+        };
         let options = Self::process_options(self.command_timeout);
         let process_result = CommandRunner::new()
             .run_async("powershell.exe", None, &options)
@@ -438,14 +461,29 @@ impl LocalAgentSessionScanner {
         };
 
         let now = Utc::now();
-        let sessions = self.scan_files(
-            &host,
-            now,
-            &Self::codex_sessions_root(),
-            &Self::claude_projects_roots(),
-            &processes,
-            include_claude_files,
-        );
+        let codex_root = Self::codex_sessions_root();
+        let claude_roots = Self::claude_projects_roots();
+        let sessions = if include_claude_files {
+            // Presence catalog and transcript discovery perform bounded disk
+            // I/O; avoid blocking the async runtime while the app is running.
+            let scanner = self.clone();
+            let worker_host = host.clone();
+            tokio::task::spawn_blocking(move || {
+                let _permit = presence_permit;
+                scanner.scan_files(
+                    &worker_host,
+                    Utc::now(),
+                    &codex_root,
+                    &claude_roots,
+                    &processes,
+                    true,
+                )
+            })
+            .await
+            .unwrap_or_default()
+        } else {
+            self.scan_files(&host, now, &codex_root, &claude_roots, &processes, false)
+        };
         AgentSessionHostResult {
             host,
             sessions,
@@ -524,11 +562,11 @@ impl LocalAgentSessionScanner {
             .into_iter()
             .partition(|process| process.provider == Some(AgentSessionProvider::Pi));
         let mut metadata_budget = pi_family::budget_for(&self.config);
-        let mut rollouts = VecDeque::from(Self::codex_rollouts(
+        let mut rollouts = Self::codex_rollouts(
             codex_root,
             now.with_timezone(&Local).date_naive(),
             &mut metadata_budget,
-        ));
+        );
         let claude_count = agents
             .iter()
             .filter(|process| process.provider == Some(AgentSessionProvider::Claude))
@@ -544,6 +582,43 @@ impl LocalAgentSessionScanner {
             claude_transcripts
                 .retain(|transcript| !Self::is_claude_probe_transcript(transcript, &probe_id));
         }
+        if include_claude_files && codex_process_running {
+            // Preserve the normal Codex/Claude scan budget; the catalog is a
+            // separate best-effort supplement for older session directories.
+            let paths = codex_catalog::recent_rollouts(codex_root, now);
+            let catalog_budget = pi_family::budget_for(&self.config);
+            let mut seen: HashSet<_> = rollouts
+                .iter()
+                .map(|r| r.metadata.session_id.clone())
+                .collect();
+            for path in paths {
+                if !catalog_budget.has_time_remaining() {
+                    break;
+                }
+                let Some(modified_at) = path
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(DateTime::<Utc>::from)
+                else {
+                    continue;
+                };
+                let Some(metadata) = CodexRolloutFirstLineParser::read_first_line(&path)
+                    .and_then(|line| CodexRolloutFirstLineParser::parse(&line))
+                else {
+                    continue;
+                };
+                if seen.insert(metadata.session_id.clone()) {
+                    rollouts.push(CodexRollout {
+                        path,
+                        modified_at,
+                        metadata,
+                    });
+                }
+            }
+            rollouts.sort_by_key(|rollout| std::cmp::Reverse(rollout.modified_at));
+        }
+        let mut rollouts = VecDeque::from(rollouts);
         let mut sessions = Vec::new();
 
         for process in agents {
