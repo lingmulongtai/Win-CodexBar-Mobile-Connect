@@ -7,6 +7,7 @@ mod auto_resume;
 mod coding_activity;
 mod commands;
 mod desktop_peer;
+mod discord_presence;
 mod events;
 mod floatbar;
 mod geometry_store;
@@ -416,6 +417,7 @@ fn main() {
             floatbar::install(app.handle());
             auto_refresh::install(app.handle().clone());
             stay_awake::install(app.handle().clone());
+            discord_presence::install(settings.discord_presence_enabled);
             mobile_bridge::install(app.handle().clone());
             desktop_peer::install(app.handle().clone());
             if settings.powertoys_status_pipe_enabled {
@@ -538,6 +540,7 @@ fn main() {
         .run(|_app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 stay_awake::shutdown();
+                discord_presence::shutdown();
             }
         });
 }

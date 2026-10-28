@@ -1783,3 +1783,6 @@ DesktopPeerEmpty = No hay PCs guardadas.
 DesktopPeerDataHelp = El uso, historial y gastos provienen de la PC seleccionada y usan su periodo y zona horaria. No se comparten detalles de proyectos ni conversaciones. El inicio de sesión y la recopilación se aplican a esta PC; selecciónala para ver los datos locales.
 NativeFeatureWindowsOnly = Esta integración nativa está disponible actualmente solo en Windows.
 MacManualUpdatesHelper = Descarga el DMG de Mac desde las versiones de esta aplicación, cierra la app y reemplázala en Applications.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Muestra la actividad local reciente de Codex, Claude Code o Pi/OMP en Discord para escritorio. Solo comparte el nombre del servicio, no proyectos, rutas ni conversaciones. La detección es aproximada y puede tardar unos minutos en desaparecer.

@@ -937,6 +937,8 @@ locale_keys! {
     UsageSpendPartialModelBreakdown,
     UsageSpendShareEmpty,
     UsageSpendShareFailed,
+    DiscordPresenceLabel,
+    DiscordPresenceHelper,
     AgentSessionsTitle,
     AgentSessionsEnableLabel,
     AgentSessionsEnableHelper,
