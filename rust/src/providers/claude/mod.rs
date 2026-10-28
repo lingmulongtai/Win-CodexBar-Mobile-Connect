@@ -211,6 +211,19 @@ fn claude_plan_label(tier: &str) -> String {
 }
 
 const CLAUDE_PROBE_SESSION_ID_FILE: &str = ".codexbar-session-id";
+
+/// Read the existing probe identity without creating a probe directory.
+pub(crate) fn existing_probe_session_id() -> Option<String> {
+    let base = dirs::data_local_dir().or_else(dirs::home_dir)?;
+    let path = base
+        .join("CodexBar")
+        .join("claude-usage-probe")
+        .join(CLAUDE_PROBE_SESSION_ID_FILE);
+    let value = std::fs::read_to_string(path).ok()?;
+    let trimmed = value.trim();
+    uuid::Uuid::parse_str(trimmed).ok()?;
+    Some(trimmed.to_owned())
+}
 const CLAUDE_PROBE_LOCK_FILE: &str = ".codexbar-probe.lock";
 const CLAUDE_PROBE_CACHE_FILE: &str = ".codexbar-usage-cache.json";
 /// How long a second codexbar process waits for a running probe to finish.

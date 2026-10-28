@@ -415,6 +415,136 @@ bad line
     }
 
     #[test]
+    fn presence_scans_recent_claude_files_without_a_native_process() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let path = project.join("session.jsonl");
+        fs::write(
+            &path,
+            "{\"type\":\"user\",\"sessionId\":\"test-session\"}\n",
+        )
+        .unwrap();
+        let scanner = LocalAgentSessionScanner::new(
+            SessionScanConfig {
+                directory_scan_budget: Duration::from_secs(5),
+                ..Default::default()
+            },
+            Duration::from_secs(5),
+        );
+        let mut budget = pi_family::DirectoryScanBudget::new(512, 1, Duration::from_secs(5));
+        let mut transcripts = LocalAgentSessionScanner::claude_transcripts_from_roots(
+            &[root.path().to_path_buf()],
+            Vec::new(),
+            1,
+            &mut budget,
+        );
+        let transcript = transcripts.pop().unwrap();
+        let modified_at = transcript.modified_at;
+        let result = scanner
+            .claude_file_session("local", modified_at, transcript)
+            .unwrap();
+        assert_eq!(result.provider, AgentSessionProvider::Claude);
+        assert_eq!(result.pid, None);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(121))
+            .unwrap();
+        let mut budget = pi_family::DirectoryScanBudget::new(512, 1, Duration::from_secs(5));
+        let transcript = LocalAgentSessionScanner::claude_transcripts_from_roots(
+            &[root.path().to_path_buf()],
+            Vec::new(),
+            1,
+            &mut budget,
+        )
+        .pop()
+        .unwrap();
+        assert!(
+            scanner
+                .claude_file_session("local", Utc::now(), transcript)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn claude_discovery_skips_newer_unparseable_transcripts() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let valid = project.join("valid.jsonl");
+        let invalid = project.join("invalid.jsonl");
+        fs::write(&valid, "{\"cwd\":\"C:\\\\work\"}\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&valid)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(5))
+            .unwrap();
+        fs::write(&invalid, "").unwrap();
+        let mut budget = pi_family::DirectoryScanBudget::new(512, 1, Duration::from_secs(5));
+        let transcript = LocalAgentSessionScanner::claude_transcripts_from_roots(
+            &[root.path().to_path_buf()],
+            Vec::new(),
+            1,
+            &mut budget,
+        )
+        .pop()
+        .unwrap();
+        assert_eq!(transcript.path, valid);
+        let scanner = LocalAgentSessionScanner::default();
+        let modified_at = transcript.modified_at;
+        assert_eq!(
+            scanner
+                .claude_file_session("local", modified_at, transcript)
+                .unwrap()
+                .id,
+            "valid"
+        );
+    }
+
+    #[test]
+    fn presence_excludes_the_apps_own_claude_probe_identity() {
+        let probe = "1af52350-bc97-460a-9fb1-270a558905ac";
+        let mut transcript = ClaudeTranscriptCandidate {
+            path: PathBuf::from("session.jsonl"),
+            modified_at: Utc::now(),
+            metadata: ClaudeTranscriptMetadata {
+                session_id: Some(probe.into()),
+                cwd: None,
+            },
+        };
+        assert!(LocalAgentSessionScanner::is_claude_probe_transcript(
+            &transcript,
+            probe
+        ));
+        transcript.metadata.session_id = None;
+        transcript.path = PathBuf::from(format!("{probe}.jsonl"));
+        assert!(LocalAgentSessionScanner::is_claude_probe_transcript(
+            &transcript,
+            probe
+        ));
+        transcript.path = PathBuf::from("another.jsonl");
+        assert!(!LocalAgentSessionScanner::is_claude_probe_transcript(
+            &transcript,
+            probe
+        ));
+    }
+
+    #[test]
+    fn presence_excludes_own_probe_descendants_and_handles_cycles() {
+        let parents = HashMap::from([(20, 10), (30, 20), (40, 40), (50, 60), (60, 50)]);
+        assert!(LocalAgentSessionScanner::is_descendant_of(30, 10, &parents));
+        assert!(!LocalAgentSessionScanner::is_descendant_of(
+            40, 10, &parents
+        ));
+        assert!(!LocalAgentSessionScanner::is_descendant_of(
+            50, 10, &parents
+        ));
+    }
+
+    #[test]
     fn budgeted_claude_mapper_preserves_legacy_output() {
         let home = tempfile::tempdir().expect("home");
         let cwd = r"C:\work\project";
