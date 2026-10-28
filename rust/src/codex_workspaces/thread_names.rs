@@ -219,7 +219,7 @@ fn skip_to_line_end<R: BufRead>(reader: &mut R) -> bool {
 }
 
 /// Directory holding `state_<n>.sqlite` for one session.
-pub(super) fn sqlite_home(
+pub(crate) fn sqlite_home(
     codex_home: &Path,
     configured_home: Option<&Path>,
     env_sqlite_home: Option<&str>,
@@ -245,7 +245,7 @@ pub(super) fn sqlite_home(
 /// Only the user config is read: project, managed and profile layers are not
 /// persisted with the rollout and an untrusted checkout must not redirect the
 /// lookup. Only the first 256 KiB is read.
-pub(super) fn configured_sqlite_home(codex_home: &Path) -> Option<PathBuf> {
+pub(crate) fn configured_sqlite_home(codex_home: &Path) -> Option<PathBuf> {
     let file = File::open(codex_home.join("config.toml")).ok()?;
     let mut bytes = Vec::new();
     file.take(CONFIG_PREFIX_BYTES)
@@ -279,7 +279,7 @@ fn top_level_sqlite_home(contents: &str) -> Option<String> {
 }
 
 /// Highest `state_<n>.sqlite` in `dir`, else the default `state_5.sqlite` path.
-pub(super) fn newest_state_database(dir: &Path) -> PathBuf {
+pub(crate) fn newest_state_database(dir: &Path) -> PathBuf {
     let newest = fs::read_dir(dir).ok().and_then(|entries| {
         entries
             .flatten()

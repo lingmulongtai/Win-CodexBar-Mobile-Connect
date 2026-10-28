@@ -8,7 +8,7 @@ mod indexer;
 mod project_names;
 mod projectless;
 mod sidecar;
-mod thread_names;
+pub(crate) mod thread_names;
 mod turn_performance;
 mod types;
 
