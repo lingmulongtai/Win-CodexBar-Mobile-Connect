@@ -10,6 +10,8 @@ The Discord application ID is `[REMOVED]` and belongs to this fork's Discord app
 
 On 2026-10-28, fetched the read-only `nesszer/Win-CodexBar` default branch at `31b10ce42` against fork main `9ea38f9b6`. The branches diverged by 133 fork and 131 upstream commits. The upstream local-only session work (`7cc8dc4d5`, `429bcfa25`) changes remote discovery and is unnecessary for this feature, which calls the existing local scanner directly; the remote decoding changes are likewise outside its path. The Codex token-event timestamp change `48ce07d57` affects the separate Usage & Spend indexer, not the local session scanner, and is deferred with the remaining broad upstream divergence rather than merging over fork-specific Mobile Connect and release behavior. No upstream changes were incorporated for this feature.
 
+A further read-only fetch before the local PC update checked upstream `89cf121ada8c345b2ac1056439cec6c407fd21dc`. Its three newer commits concern tray rendering, a Grok ACP test, and changelog entries, not the Discord or local-session path, so none was incorporated in this local update. The existing fork features and release ownership remain unchanged.
+
 ## Validation
 
 The local Windows test run passed 34 agent-session tests, four activity-mapping tests, four desktop IPC/settings tests, all 1,359 frontend tests, the frontend build and locale check. A live Discord desktop IPC handshake accepted the supplied application ID, activity and icon URL, and acknowledged a clear request. This is protocol evidence; it does not establish visual display or end-to-end detection of every Claude installation.
