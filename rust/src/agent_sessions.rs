@@ -514,6 +514,9 @@ impl LocalAgentSessionScanner {
             agents.retain(|process| !Self::is_descendant_of(process.pid, own_pid, &parents));
         }
         agents.sort_by_key(|process| std::cmp::Reverse(process.started_at));
+        let codex_process_running = agents
+            .iter()
+            .any(|process| process.provider == Some(AgentSessionProvider::Codex));
         // Pi-family processes are correlated in a dedicated dialect-aware
         // pass (upstream 0.48.0 #2626); split them out before the
         // codex/claude loop consumes its records.
@@ -586,11 +589,14 @@ impl LocalAgentSessionScanner {
             &mut pi_budget,
         ));
 
-        sessions.extend(
-            rollouts
-                .into_iter()
-                .filter_map(|rollout| self.codex_file_session(host, now, rollout)),
-        );
+        sessions.extend(rollouts.into_iter().filter_map(|rollout| {
+            self.codex_file_session(
+                host,
+                now,
+                rollout,
+                include_claude_files && codex_process_running,
+            )
+        }));
         sessions.sort_by(|lhs, rhs| {
             (rhs.state == AgentSessionState::Active)
                 .cmp(&(lhs.state == AgentSessionState::Active))
@@ -765,9 +771,16 @@ impl LocalAgentSessionScanner {
         host: &str,
         now: DateTime<Utc>,
         rollout: CodexRollout,
+        for_presence_with_codex: bool,
     ) -> Option<AgentSession> {
-        self.config
+        let age = now.signed_duration_since(rollout.modified_at);
+        let presence_candidate = for_presence_with_codex
+            && age >= ChronoDuration::zero()
+            && age <= ChronoDuration::seconds(crate::discord_presence::MAX_OPEN_TURN_SECONDS);
+        (self
+            .config
             .file_only_session_allowed(rollout.modified_at, now)
+            || presence_candidate)
             .then(|| {
                 let source = rollout.metadata.session_source();
                 let cwd = rollout.metadata.cwd;

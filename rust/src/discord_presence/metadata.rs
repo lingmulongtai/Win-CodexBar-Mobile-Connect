@@ -17,6 +17,64 @@ const MAX_TRANSCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const METADATA_PREFIX_BYTES: u64 = 256 * 1024;
 const METADATA_TAIL_BYTES: u64 = 512 * 1024;
 
+/// Read only lifecycle markers from a bounded tail; never return transcript text.
+pub(super) fn codex_open_turn(path: &Path, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let mut file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let offset = size.saturating_sub(METADATA_TAIL_BYTES);
+    file.seek(SeekFrom::Start(offset)).ok()?;
+    let mut tail = Vec::new();
+    file.take(METADATA_TAIL_BYTES).read_to_end(&mut tail).ok()?;
+    // A partial final line may be a completion event still being written.
+    if !tail.ends_with(b"\n") {
+        return None;
+    }
+    let mut lines = tail.split(|byte| *byte == b'\n');
+    if offset != 0 {
+        lines.next(); // The first line may be truncated.
+    }
+    let mut open: Option<(String, DateTime<Utc>)> = None;
+    for line in lines {
+        let Ok(value) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(Value::as_str) != Some("event_msg") {
+            continue;
+        }
+        let payload = &value["payload"];
+        match payload.get("type").and_then(Value::as_str) {
+            Some("task_started") => {
+                open = payload
+                    .get("turn_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| {
+                        let started = value.get("timestamp")?.as_str()?;
+                        let started = DateTime::parse_from_rfc3339(started)
+                            .ok()?
+                            .with_timezone(&Utc);
+                        Some((id.to_owned(), started))
+                    });
+            }
+            Some("task_complete" | "turn_aborted") => {
+                let id = payload.get("turn_id").and_then(Value::as_str);
+                if id.is_none()
+                    || open
+                        .as_ref()
+                        .is_some_and(|(current, _)| Some(current.as_str()) == id)
+                {
+                    open = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let (_, started) = open?;
+    let age = now.signed_duration_since(started);
+    (age >= chrono::Duration::zero()
+        && age <= chrono::Duration::seconds(super::MAX_OPEN_TURN_SECONDS))
+    .then_some(started)
+}
+
 #[derive(Default)]
 pub(super) struct PresenceMetadata {
     pub model: Option<String>,
