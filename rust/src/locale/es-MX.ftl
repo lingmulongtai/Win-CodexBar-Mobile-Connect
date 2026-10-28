@@ -1785,4 +1785,4 @@ NativeFeatureWindowsOnly = Esta integración nativa está disponible actualmente
 MacManualUpdatesHelper = Descarga el DMG de Mac desde las versiones de esta aplicación, cierra la app y reemplázala en Applications.
 
 DiscordPresenceLabel = Discord Rich Presence
-DiscordPresenceHelper = Muestra la actividad local reciente de Codex, Claude Code o Pi/OMP en Discord para escritorio. Solo comparte el nombre del servicio, no proyectos, rutas ni conversaciones. La detección es aproximada y puede tardar unos minutos en desaparecer.
+DiscordPresenceHelper = Muestra un estado persistente en Discord mientras la app está abierta. Puede compartir servicio, modelo, tiempo transcurrido y totales locales de tokens, pero no proyectos, rutas ni conversaciones. Los tokens requieren seguimiento de costos y la detección es aproximada.
