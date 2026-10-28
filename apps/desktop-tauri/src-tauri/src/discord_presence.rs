@@ -184,7 +184,16 @@ mod windows {
                     usage_task_valid = true;
                 }
             }
-            let provider = codexbar::discord_presence::current_provider(&scan.sessions, now);
+            // Session selection may read bounded transcript tails. Keep it
+            // off the async runtime and reuse the result for the payload.
+            let active_session = tokio::select! {
+                biased;
+                changed = enabled.changed() => { if changed.is_err() { break; } continue; },
+                result = tokio::task::spawn_blocking(move || {
+                    codexbar::discord_presence::current_session(&scan.sessions, now).cloned()
+                }) => result.ok().flatten(),
+            };
+            let provider = active_session.as_ref().map(|session| session.provider);
             if provider.is_some() {
                 last_provider = provider;
             }
@@ -214,7 +223,9 @@ mod windows {
                     changed = enabled.changed() => { if changed.is_err() { break; } continue; },
                     result = tokio::task::spawn_blocking(move || {
                         let _permit = permit;
-                        codexbar::discord_presence::activity_with_usage(&scan.sessions, now, tokens_enabled, periods)
+                        active_session.as_ref().map(|session| {
+                            codexbar::discord_presence::activity_for_session(session, now, tokens_enabled, periods)
+                        })
                     }) => result.ok().flatten(),
                 }
             } else { None }.unwrap_or_else(|| codexbar::discord_presence::idle_activity_with_usage(selected, periods));

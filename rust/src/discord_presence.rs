@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 
 mod metadata;
 
+pub(crate) const MAX_OPEN_TURN_SECONDS: i64 = 4 * 60 * 60;
+
 /// User-approved public GIF of the selected Codex pet's idle animation.
 const PET_ICON_URL: &str = "https://raw.githubusercontent.com/lingmulongtai/Win-CodexBar-Mobile-Connect/d40229141dc33ca54f86aa2d6eb6b42c8667ee7e/rust/assets/discord/pets/maomao-idle.gif";
 const REPOSITORY_URL: &str = "https://github.com/lingmulongtai/Win-CodexBar-Mobile-Connect";
@@ -117,22 +119,51 @@ pub fn idle_activity_with_usage(
     activity
 }
 
-fn current_session(sessions: &[AgentSession], now: DateTime<Utc>) -> Option<&AgentSession> {
-    sessions
-        .iter()
-        .filter(|session| {
-            session.state == AgentSessionState::Active
-                && session.activity.last_activity_at.is_some_and(|last| {
-                    let age = now.signed_duration_since(last);
-                    age >= Duration::zero() && age <= Duration::seconds(120)
-                })
+pub fn current_session(sessions: &[AgentSession], now: DateTime<Utc>) -> Option<&AgentSession> {
+    // Scanner output is usually sorted, but callers need not supply that
+    // order. Limit stale transcript reads so presence cannot stall the UI.
+    let mut candidates: Vec<_> = sessions.iter().collect();
+    candidates.sort_by_key(|session| std::cmp::Reverse(session.activity.last_activity_at));
+    let mut stale_reads = 0;
+    candidates.into_iter().find(|session| {
+        let Some(last) = session.activity.last_activity_at else {
+            return false;
+        };
+        let age = now.signed_duration_since(last);
+        if age < Duration::zero() {
+            return false;
+        }
+        if session.state == AgentSessionState::Active && age <= Duration::seconds(120) {
+            return true;
+        }
+        if session.provider != AgentSessionProvider::Codex
+            || age > Duration::seconds(MAX_OPEN_TURN_SECONDS)
+        {
+            return false;
+        }
+        if stale_reads >= 16 {
+            return false;
+        }
+        stale_reads += 1;
+        let Some(started) = session
+            .transcript_path
+            .as_deref()
+            .and_then(|path| metadata::codex_open_turn(std::path::Path::new(path), now))
+        else {
+            return false;
+        };
+        // Process-to-transcript correlation is approximate. Require a
+        // live Codex process that existed when the turn began, and bound
+        // old incomplete records to avoid retaining a crashed session.
+        sessions.iter().any(|candidate| {
+            candidate.provider == AgentSessionProvider::Codex
+                && candidate.pid.is_some()
+                && candidate
+                    .activity
+                    .started_at
+                    .is_some_and(|time| time <= started)
         })
-        .max_by_key(|session| {
-            session
-                .activity
-                .last_activity_at
-                .or(session.activity.started_at)
-        })
+    })
 }
 
 pub fn current_provider(
@@ -157,6 +188,15 @@ pub fn activity_with_usage(
     periods: Option<UsagePeriods>,
 ) -> Option<Value> {
     let session = current_session(sessions, now)?;
+    Some(activity_for_session(session, now, tokens_enabled, periods))
+}
+
+pub fn activity_for_session(
+    session: &AgentSession,
+    now: DateTime<Utc>,
+    tokens_enabled: bool,
+    periods: Option<UsagePeriods>,
+) -> Value {
     let name = match session.provider {
         AgentSessionProvider::Codex => "Codex",
         AgentSessionProvider::Claude => "Claude Code",
@@ -210,7 +250,7 @@ pub fn activity_with_usage(
     if let Some(start) = meta.started_at {
         activity["timestamps"] = json!({"start": start.timestamp()});
     }
-    Some(activity)
+    activity
 }
 
 #[cfg(test)]
@@ -375,6 +415,73 @@ mod tests {
         let now = Utc::now();
         let mut s = session(AgentSessionProvider::Claude, now);
         s.activity.last_activity_at = None;
+        assert!(activity_for_sessions(&[s], now).is_none());
+    }
+
+    #[test]
+    fn keeps_codex_active_for_a_long_open_turn_but_not_after_completion() {
+        let now = Utc::now();
+        let started = now - Duration::minutes(10);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let start = format!(
+            "{{\"type\":\"event_msg\",\"timestamp\":\"{}\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"turn-a\"}}}}\n",
+            started.to_rfc3339()
+        );
+        let mut s = session(AgentSessionProvider::Codex, now);
+        s.state = AgentSessionState::Idle;
+        s.activity.last_activity_at = Some(started);
+        s.activity.started_at = Some(started - Duration::minutes(1));
+        s.transcript_path = Some(path.to_string_lossy().to_string());
+        std::fs::write(&path, &start).unwrap();
+        assert_eq!(
+            activity_for_sessions(&[s.clone()], now).unwrap()["details"],
+            "⚡ Using Codex"
+        );
+
+        for end in ["task_complete", "turn_aborted"] {
+            let close = format!(
+                "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"{end}\",\"turn_id\":\"turn-a\"}}}}\n"
+            );
+            std::fs::write(&path, format!("{start}{close}")).unwrap();
+            assert!(activity_for_sessions(&[s.clone()], now).is_none(), "{end}");
+        }
+        std::fs::write(&path, format!("{start}{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\",\"turn_id\":\"other\"}}}}\n")).unwrap();
+        assert!(activity_for_sessions(&[s.clone()], now).is_some());
+        std::fs::write(&path, format!("{start}{{\"type\":\"event_msg\"")).unwrap();
+        assert!(activity_for_sessions(&[s], now).is_none());
+    }
+
+    #[test]
+    fn open_turn_requires_a_plausible_live_codex_process_and_recent_evidence() {
+        let now = Utc::now();
+        let started = now - Duration::minutes(10);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let write_start = |time: DateTime<Utc>| {
+            std::fs::write(&path, format!(
+                "{{\"type\":\"event_msg\",\"timestamp\":\"{}\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"turn-a\"}}}}\n",
+                time.to_rfc3339()
+            )).unwrap();
+        };
+        let mut s = session(AgentSessionProvider::Codex, now);
+        s.state = AgentSessionState::Idle;
+        s.activity.last_activity_at = Some(started);
+        s.activity.started_at = Some(started - Duration::minutes(1));
+        s.transcript_path = Some(path.to_string_lossy().to_string());
+        write_start(started);
+        let mut file_only = s.clone();
+        file_only.pid = None;
+        assert!(activity_for_sessions(&[file_only.clone()], now).is_none());
+        let mut process = s.clone();
+        process.transcript_path = None;
+        process.activity.last_activity_at = None;
+        assert!(activity_for_sessions(&[file_only.clone(), process.clone()], now).is_some());
+        process.activity.started_at = Some(started + Duration::seconds(1));
+        assert!(activity_for_sessions(&[file_only, process], now).is_none());
+        write_start(now + Duration::seconds(1));
+        assert!(activity_for_sessions(&[s.clone()], now).is_none());
+        write_start(now - Duration::seconds(MAX_OPEN_TURN_SECONDS + 1));
         assert!(activity_for_sessions(&[s], now).is_none());
     }
 

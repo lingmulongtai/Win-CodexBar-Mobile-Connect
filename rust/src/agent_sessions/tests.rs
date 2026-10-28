@@ -323,6 +323,25 @@ bad line
     }
 
     #[test]
+    fn presence_can_consider_older_codex_files_only_with_a_live_process() {
+        let now = Utc::now();
+        let scanner = LocalAgentSessionScanner::default();
+        let rollout = |age| CodexRollout {
+            path: PathBuf::from("rollout-test.jsonl"),
+            modified_at: now - ChronoDuration::seconds(age),
+            metadata: CodexRolloutMetadata {
+                session_id: "test".into(),
+                cwd: None,
+                originator: None,
+                source: None,
+            },
+        };
+        assert!(scanner.codex_file_session("host", now, rollout(3600), false).is_none());
+        assert!(scanner.codex_file_session("host", now, rollout(3600), true).is_some());
+        assert!(scanner.codex_file_session("host", now, rollout(crate::discord_presence::MAX_OPEN_TURN_SECONDS + 1), true).is_none());
+    }
+
+    #[test]
     fn claude_metadata_parser_stops_after_session_and_cwd_are_known() {
         struct FirstLineOnly {
             bytes: &'static [u8],
