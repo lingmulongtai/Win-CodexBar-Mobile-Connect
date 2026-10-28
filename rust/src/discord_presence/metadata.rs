@@ -160,10 +160,22 @@ fn scan_lines(
         if let Some(settings) = settings {
             let effort = settings
                 .get("effort")
-                .or_else(|| settings.get("reasoning_effort"))
-                .or_else(|| settings.pointer("/collaboration_mode/settings/reasoning_effort"));
-            if let Some(effort) = effort {
-                result.effort = match effort.as_str() {
+                .and_then(Value::as_str)
+                .or_else(|| settings.get("reasoning_effort").and_then(Value::as_str))
+                .or_else(|| {
+                    settings
+                        .pointer("/collaboration_mode/settings/reasoning_effort")
+                        .and_then(Value::as_str)
+                });
+            let has_effort_field = settings.get("effort").is_some()
+                || settings.get("reasoning_effort").is_some()
+                || settings
+                    .pointer("/collaboration_mode/settings/reasoning_effort")
+                    .is_some();
+            // A new turn is a fresh snapshot; do not present a prior turn's
+            // effort as current when the new one supplies no evidence.
+            if kind == Some("turn_context") || has_effort_field {
+                result.effort = match effort {
                     Some("minimal") => Some("Minimal"),
                     Some("low") => Some("Low"),
                     Some("medium") => Some("Medium"),
@@ -231,10 +243,7 @@ mod tests {
     fn codex_modes_follow_explicit_settings_and_clear_on_model_change() {
         let now = Utc::now();
         let mut result = PresenceMetadata::default();
-        let rows = concat!(
-            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-6.1\",\"reasoning_effort\":\"high\",\"service_tier\":\"priority\"}}}\n",
-            "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6.1\"}}\n"
-        );
+        let rows = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-6.1\",\"reasoning_effort\":\"high\",\"service_tier\":\"priority\"}}}\n";
         scan_lines(
             &mut result,
             rows.as_bytes(),
@@ -244,6 +253,17 @@ mod tests {
         );
         assert_eq!(result.effort, Some("High"));
         assert_eq!(result.fast, Some(true));
+        scan_lines(
+            &mut result,
+            b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6.1\"}}\n",
+            AgentSessionProvider::Codex,
+            now,
+            false,
+        );
+        assert_eq!(result.effort, None);
+        assert_eq!(result.fast, Some(true));
+        scan_lines(&mut result, b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6.1\",\"effort\":null,\"collaboration_mode\":{\"settings\":{\"reasoning_effort\":\"xhigh\"}}}}\n", AgentSessionProvider::Codex, now, false);
+        assert_eq!(result.effort, Some("XHigh"));
         scan_lines(&mut result, b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6\",\"effort\":\"medium\",\"service_tier\":\"default\"}}\n", AgentSessionProvider::Codex, now, false);
         assert_eq!(result.effort, Some("Medium"));
         assert_eq!(result.fast, Some(false));
