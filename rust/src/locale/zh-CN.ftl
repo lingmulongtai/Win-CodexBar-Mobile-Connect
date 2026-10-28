@@ -1786,4 +1786,4 @@ NativeFeatureWindowsOnly = 此原生集成功能目前仅支持Windows。
 MacManualUpdatesHelper = 从本应用的发布页面下载Mac DMG，退出应用，然后替换Applications中的应用。
 
 DiscordPresenceLabel = Discord Rich Presence
-DiscordPresenceHelper = 应用运行期间持续显示 Discord 状态。可能共享服务、模型、会话经过时间和本机令牌总数，不会共享项目名称、路径或对话。令牌显示需要启用成本跟踪，检测结果为估算。
+DiscordPresenceHelper = 应用运行期间持续显示 Discord 状态，并在可用时共享服务、模型、推理强度、速度、会话经过时间和本机令牌总数。不会共享项目名称、路径或对话。令牌显示需要成本跟踪，检测结果为估算。

@@ -20,6 +20,8 @@ const METADATA_TAIL_BYTES: u64 = 512 * 1024;
 #[derive(Default)]
 pub(super) struct PresenceMetadata {
     pub model: Option<String>,
+    pub effort: Option<&'static str>,
+    pub fast: Option<bool>,
     pub started_at: Option<DateTime<Utc>>,
     pub tokens: Option<u64>,
 }
@@ -81,6 +83,8 @@ pub(super) fn read(
         // Do not misreport an old prefix model when no recent model is found.
         if size > METADATA_TAIL_BYTES {
             result.model = None;
+            result.effort = None;
+            result.fast = None;
         }
         scan_lines(&mut result, &tail, provider, now, false);
     }
@@ -121,20 +125,74 @@ fn scan_lines(
                 .map(|t| t.with_timezone(&Utc))
                 .filter(|t| *t <= now);
         }
+        let settings = match (provider, kind) {
+            (AgentSessionProvider::Codex, Some("turn_context")) => value.get("payload"),
+            (AgentSessionProvider::Codex, Some("event_msg"))
+                if value.pointer("/payload/type").and_then(Value::as_str)
+                    == Some("thread_settings_applied") =>
+            {
+                value.pointer("/payload/thread_settings")
+            }
+            _ => None,
+        };
         let model = match provider {
             AgentSessionProvider::Codex if kind == Some("turn_context") => {
                 value.pointer("/payload/model")
+            }
+            AgentSessionProvider::Codex if settings.is_some() => {
+                settings.and_then(|s| s.get("model"))
             }
             AgentSessionProvider::Claude if kind == Some("assistant") => {
                 value.pointer("/message/model")
             }
             _ => None,
         };
-        if let Some(model) = model
-            .and_then(Value::as_str)
-            .and_then(|value| safe_model(value, provider))
-        {
-            result.model = Some(model);
+        if let Some(raw_model) = model {
+            let model = raw_model
+                .as_str()
+                .and_then(|value| safe_model(value, provider));
+            if result.model != model {
+                result.effort = None;
+                result.fast = None;
+            }
+            result.model = model;
+        }
+        if let Some(settings) = settings {
+            let effort = settings
+                .get("effort")
+                .or_else(|| settings.get("reasoning_effort"))
+                .or_else(|| settings.pointer("/collaboration_mode/settings/reasoning_effort"));
+            if let Some(effort) = effort {
+                result.effort = match effort.as_str() {
+                    Some("minimal") => Some("Minimal"),
+                    Some("low") => Some("Low"),
+                    Some("medium") => Some("Medium"),
+                    Some("high") => Some("High"),
+                    Some("xhigh") => Some("XHigh"),
+                    Some("max") => Some("Max"),
+                    Some("ultra") => Some("Ultra"),
+                    _ => None,
+                };
+            }
+            if let Some(tier) = settings.get("service_tier") {
+                result.fast = match tier.as_str() {
+                    Some("priority" | "fast") => Some(true),
+                    Some("default" | "standard") => Some(false),
+                    _ => None,
+                };
+            }
+        }
+        if provider == AgentSessionProvider::Claude && kind == Some("assistant") {
+            // Claude usage.speed reports the speed actually used for this
+            // response. Missing or unknown evidence must clear stale status.
+            result.fast = match value
+                .pointer("/message/usage/speed")
+                .and_then(Value::as_str)
+            {
+                Some("fast") => Some(true),
+                Some("standard") => Some(false),
+                _ => None,
+            };
         }
     }
 }
@@ -167,6 +225,53 @@ mod tests {
         assert!(safe_model("gpt-6.1", AgentSessionProvider::Codex).is_some());
         assert!(safe_model("C:/private/path", AgentSessionProvider::Codex).is_none());
         assert!(safe_model("private-secret", AgentSessionProvider::Claude).is_none());
+    }
+
+    #[test]
+    fn codex_modes_follow_explicit_settings_and_clear_on_model_change() {
+        let now = Utc::now();
+        let mut result = PresenceMetadata::default();
+        let rows = concat!(
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-6.1\",\"reasoning_effort\":\"high\",\"service_tier\":\"priority\"}}}\n",
+            "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6.1\"}}\n"
+        );
+        scan_lines(
+            &mut result,
+            rows.as_bytes(),
+            AgentSessionProvider::Codex,
+            now,
+            false,
+        );
+        assert_eq!(result.effort, Some("High"));
+        assert_eq!(result.fast, Some(true));
+        scan_lines(&mut result, b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6\",\"effort\":\"medium\",\"service_tier\":\"default\"}}\n", AgentSessionProvider::Codex, now, false);
+        assert_eq!(result.effort, Some("Medium"));
+        assert_eq!(result.fast, Some(false));
+        scan_lines(
+            &mut result,
+            b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5\"}}\n",
+            AgentSessionProvider::Codex,
+            now,
+            false,
+        );
+        assert_eq!(result.effort, None);
+        assert_eq!(result.fast, None);
+    }
+
+    #[test]
+    fn claude_speed_is_observed_and_missing_speed_clears_old_value() {
+        let now = Utc::now();
+        let mut result = PresenceMetadata::default();
+        scan_lines(&mut result, b"{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-6\",\"usage\":{\"speed\":\"fast\"}}}\n", AgentSessionProvider::Claude, now, false);
+        assert_eq!(result.fast, Some(true));
+        scan_lines(
+            &mut result,
+            b"{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-6\",\"usage\":{}}}\n",
+            AgentSessionProvider::Claude,
+            now,
+            false,
+        );
+        assert_eq!(result.fast, None);
     }
 
     #[test]
