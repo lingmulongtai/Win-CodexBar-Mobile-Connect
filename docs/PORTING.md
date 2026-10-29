@@ -349,6 +349,5 @@ Focused Tavily and light-theme tests passed. The Windows run of `cargo test -p
 codexbar --lib` passed 4,922 tests with two ignored, using synthetic Cursor
 Safe Storage fixtures; the live Cursor account and DPAPI path were not tested.
 The frontend suite passed 1,371 tests, and `pnpm run build` and locale parity
-passed. The desktop pace bridge, final native build and runtime UI proof are
-tracked in the delivery report for this branch.
-
+passed. Eighteen desktop pace-bridge tests passed. The final native build and
+runtime UI proof are tracked in the delivery report for this branch.
