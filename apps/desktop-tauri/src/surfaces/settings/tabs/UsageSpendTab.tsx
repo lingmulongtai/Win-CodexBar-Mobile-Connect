@@ -58,6 +58,8 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const peer = useDesktopPeerStatus();
   const isRemote = Boolean(peer?.selectedId);
   const requestRef = useRef(0);
+  const activeRequestRef = useRef<number | null>(null);
+  const refreshQueuedRef = useRef(false);
   const period = normalizeCostPeriod(settings.spendDashboardPeriod ?? settings.costReportingPeriod);
   const trackCosts = settings.costUsageEnabled ?? true;
   const includeOpenCodex = settings.openCodexUsageLogsEnabled ?? false;
@@ -71,8 +73,15 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const [shareError, setShareError] = useState<string | null>(null);
   const [view, setView] = useState<BreakdownView>("providers");
 
-  const load = useCallback(async (forceRefresh = false, silent = false) => {
+  const load: (forceRefresh?: boolean, silent?: boolean) => Promise<void> = useCallback(async (forceRefresh = false, silent = false) => {
+    // A burst of provider events must not supersede every in-flight request:
+    // publish its result, then perform one coalesced silent refresh.
+    if (silent && activeRequestRef.current !== null) {
+      refreshQueuedRef.current = true;
+      return;
+    }
     const request = ++requestRef.current;
+    activeRequestRef.current = request;
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -85,7 +94,14 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
     } catch (err: unknown) {
       if (!silent && request === requestRef.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (!silent && request === requestRef.current) setLoading(false);
+      if (request === requestRef.current) {
+        activeRequestRef.current = null;
+        setLoading(false);
+        if (refreshQueuedRef.current) {
+          refreshQueuedRef.current = false;
+          void load(false, true);
+        }
+      }
     }
     // The OpenCodex flags and Track costs change what the backend scans.
   }, [peer?.sourceId, period, trackCosts, includeOpenCodex, hideNativeCodex]);
@@ -93,7 +109,11 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   useEffect(() => {
     setSummary(null);
     void load(false);
-    return () => { requestRef.current++; };
+    return () => {
+      requestRef.current++;
+      activeRequestRef.current = null;
+      refreshQueuedRef.current = false;
+    };
   }, [load]);
 
   // Upstream 0.55.0 #3106 parity: provider token/cost publications refresh the
