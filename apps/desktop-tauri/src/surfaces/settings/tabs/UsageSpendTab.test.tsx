@@ -1,17 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getUsageSpendSummary: vi.fn(),
   writeUsageSpendExport: vi.fn(),
 }));
+const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
 const peerState = vi.hoisted(() => ({ current: null as import("../../../types/bridge").DesktopPeerStatus | null }));
 vi.mock("../../../hooks/useDesktopPeerStatus", () => ({ useDesktopPeerStatus: () => peerState.current }));
 
 vi.mock("../../../lib/tauri", () => tauriMocks);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
+  listen: vi.fn().mockImplementation(async (name: string, callback: () => void) => {
+    eventHandlers.set(name, callback);
+    return () => eventHandlers.delete(name);
+  }),
 }));
 
 const EN: Record<string, string> = {
@@ -125,11 +129,37 @@ function stat(label: string, scope: HTMLElement = document.body): string | null 
 describe("UsageSpendTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    eventHandlers.clear();
     peerState.current = null;
     tauriMocks.getUsageSpendSummary.mockImplementation(
       async (options?: { period?: string }) => summary(options?.period ?? "rolling:30"),
     );
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  it("publishes the first result and coalesces updates arriving while scans run", async () => {
+    let resolveFirst!: (value: UsageSpendSummary) => void;
+    let resolveSecond!: (value: UsageSpendSummary) => void;
+    tauriMocks.getUsageSpendSummary
+      .mockImplementationOnce(() => new Promise<UsageSpendSummary>((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<UsageSpendSummary>((resolve) => { resolveSecond = resolve; }));
+    renderTab();
+    await waitFor(() => expect(eventHandlers.has("provider-updated")).toBe(true));
+    act(() => { eventHandlers.get("provider-updated")?.(); eventHandlers.get("provider-updated")?.(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveFirst(summary("month-to-date")); });
+    await screen.findByText("USD");
+    expect(screen.getByRole("button", { name: /UsageSpendRefresh/ })).toBeEnabled();
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+
+    act(() => { eventHandlers.get("provider-updated")?.(); eventHandlers.get("provider-updated")?.(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveSecond(summary("month-to-date")); });
+    await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("button", { name: /UsageSpendRefresh/ })).toBeEnabled();
   });
 
   it("scans the dashboard period, not the menu History window, and saves a new segment", async () => {
