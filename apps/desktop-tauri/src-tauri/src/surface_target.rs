@@ -13,6 +13,7 @@ const SETTINGS_TAB_IDS: &[&str] = &[
     "menu",
     "usageSpend",
     "mobileConnect",
+    "discord",
     "advanced",
     "hooks",
     "about",
@@ -173,6 +174,7 @@ mod tests {
     #[test]
     fn supported_settings_tabs_match_shell_tabs() {
         assert!(is_supported_settings_tab("mobileConnect"));
+        assert!(is_supported_settings_tab("discord"));
         assert!(is_supported_settings_tab("menuBar"));
         assert!(is_supported_settings_tab("hooks"));
         assert!(is_supported_settings_tab("about"));

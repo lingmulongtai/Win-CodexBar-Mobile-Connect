@@ -1746,6 +1746,7 @@ OpenAiOrgLimitsEmpty = Proje limiti bulunamadı.
 OpenAiOrgLimitsScoped = Proje limitleri tüm kuruluş için geçerlidir. Yüklemek için proje kimliğini temizleyin.
 OpenAiOrgLimitsTruncated = Yalnızca bazı projeler kontrol edildi.
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the pairing code above to connect a phone or tablet. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 
@@ -1784,3 +1785,6 @@ DesktopPeerEmpty = Henüz kayıtlı PC yok.
 DesktopPeerDataHelp = Kullanım, geçmiş ve harcamalar seçili PC’den gelir; o PC’nin dönemi ve saat dilimi kullanılır. Proje ve sohbet ayrıntıları paylaşılmaz. Oturum açma ve veri toplama ayarları bu PC’ye aittir; yerel veriler için bu PC’yi seçin.
 NativeFeatureWindowsOnly = Bu yerel entegrasyon şu anda yalnızca Windows’ta kullanılabilir.
 MacManualUpdatesHelper = Uygulamanın sürümler sayfasından Mac DMG dosyasını indirin, uygulamayı kapatın ve Applications içindeki uygulamayı değiştirin.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Uygulama çalışırken Discord durumunda kullanılabilir hizmet, model, akıl yürütme düzeyi, hız, oturum süresi ve yerel token toplamları gösterilir. Proje adları, yollar ve konuşmalar paylaşılmaz. Tokenlar için maliyet takibi gerekir; algılama yaklaşıktır.

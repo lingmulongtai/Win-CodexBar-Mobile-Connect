@@ -9,6 +9,7 @@ export const TAB_META: { id: SettingsTabId; labelKey: LocaleKey }[] = [
   { id: "menu", labelKey: "TabMenu" },
   { id: "usageSpend", labelKey: "TabUsageSpend" },
   { id: "mobileConnect", labelKey: "TabMobileConnect" },
+  { id: "discord", labelKey: "TabDiscord" },
   { id: "advanced", labelKey: "TabAdvanced" },
   { id: "hooks", labelKey: "TabHooks" },
   { id: "about", labelKey: "TabAbout" },
@@ -50,7 +51,7 @@ export function providersTabRequest(providerId: string): `providers:${string}` {
 }
 
 /** macOS system colors behind the white glyph of a sidebar pane chip. */
-export type SidebarChipColor = "gray" | "green" | "red" | "blue" | "teal" | "purple" | "orange";
+export type SidebarChipColor = "gray" | "green" | "red" | "blue" | "teal" | "purple" | "orange" | "discord";
 
 export interface SidebarPane {
   id: Exclude<SettingsTabId, "providers">;
@@ -68,6 +69,7 @@ export const SIDEBAR_PANES: SidebarPane[] = [
   { id: "general", labelKey: "TabGeneral", chip: "gray" },
   { id: "usageSpend", labelKey: "TabUsageSpend", chip: "green" },
   { id: "mobileConnect", labelKey: "TabMobileConnect", chip: "blue" },
+  { id: "discord", labelKey: "TabDiscord", chip: "discord" },
   { id: "notifications", labelKey: "TabNotifications", chip: "red" },
   { id: "menuBar", labelKey: "TabMenuBar", chip: "blue" },
   { id: "menu", labelKey: "TabMenu", chip: "teal" },

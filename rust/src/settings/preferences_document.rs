@@ -165,6 +165,7 @@ pub const EXCLUDED_KEYS: &[&str] = &[
     "hooks_enabled",
     "global_shortcut",
     "agent_sessions_enabled",
+    "discord_presence_enabled",
     "disable_keychain_access",
     "claude_allow_reading_claude_code_credentials",
     "codex_external_oauth_sources_allowed",

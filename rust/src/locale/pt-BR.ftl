@@ -1750,6 +1750,7 @@ OpenAiOrgLimitsEmpty = Nenhum limite de projeto encontrado.
 OpenAiOrgLimitsScoped = Os limites de projeto se aplicam à organização inteira. Limpe o ID do projeto para carregá-los.
 OpenAiOrgLimitsTruncated = Apenas alguns projetos foram verificados.
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the pairing code above to connect a phone or tablet. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 
@@ -1788,3 +1789,6 @@ DesktopPeerEmpty = Nenhum PC salvo.
 DesktopPeerDataHelp = Uso, histórico e gastos vêm do PC selecionado, usando seu período e fuso horário. Detalhes de projetos e conversas não são compartilhados. Login e coleta se aplicam a este PC; selecione-o para ver os dados locais.
 NativeFeatureWindowsOnly = Esta integração nativa está disponível atualmente apenas no Windows.
 MacManualUpdatesHelper = Baixe o DMG do Mac nas versões deste aplicativo, feche o app e substitua-o em Applications.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Mostra um status persistente no Discord com serviço, modelo, esforço, velocidade, tempo decorrido e totais locais de tokens quando disponíveis. Não compartilha projetos, caminhos nem conversas. Tokens exigem rastreamento de custos; a detecção é aproximada.

@@ -194,6 +194,7 @@ locale_keys! {
     // Tab names (Preferences)
     TabGeneral,
     TabMobileConnect,
+    TabDiscord,
     MobileSharingPending,
     MobileSharingListeningHelp,
     MobileSharingRemoteSettings,
@@ -937,6 +938,8 @@ locale_keys! {
     UsageSpendPartialModelBreakdown,
     UsageSpendShareEmpty,
     UsageSpendShareFailed,
+    DiscordPresenceLabel,
+    DiscordPresenceHelper,
     AgentSessionsTitle,
     AgentSessionsEnableLabel,
     AgentSessionsEnableHelper,

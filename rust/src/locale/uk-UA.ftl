@@ -1748,6 +1748,7 @@ OpenAiOrgLimitsEmpty = Лімітів проєктів не знайдено.
 OpenAiOrgLimitsScoped = Ліміти проєктів діють для всієї організації. Очистіть ID проєкту, щоб їх завантажити.
 OpenAiOrgLimitsTruncated = Перевірено не всі проєкти.
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the pairing code above to connect a phone or tablet. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 
@@ -1786,3 +1787,6 @@ DesktopPeerEmpty = Збережених ПК ще немає.
 DesktopPeerDataHelp = Використання, історія й витрати надходять з вибраного ПК з його періодом і часовим поясом. Подробиці проєктів і розмов не передаються. Вхід і збір даних налаштовуються для цього ПК; виберіть його, щоб побачити локальні дані.
 NativeFeatureWindowsOnly = Ця системна інтеграція наразі доступна лише у Windows.
 MacManualUpdatesHelper = Завантажте Mac DMG зі сторінки випусків програми, закрийте програму й замініть її в Applications.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Показує статус у Discord: сервіс, модель, рівень міркувань, швидкість, час сеансу та локальні підсумки токенів, коли вони доступні. Проєкти, шляхи й розмови не передаються. Для токенів потрібне відстеження витрат; виявлення приблизне.

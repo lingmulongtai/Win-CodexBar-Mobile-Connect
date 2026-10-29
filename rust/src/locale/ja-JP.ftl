@@ -1759,6 +1759,7 @@ OpenAiOrgLimitsEmpty = プロジェクト上限は見つかりませんでした
 OpenAiOrgLimitsScoped = プロジェクト上限は組織全体に適用されます。読み込むにはプロジェクト ID を空にしてください。
 OpenAiOrgLimitsTruncated = 一部のプロジェクトのみ確認しました。
 TabMobileConnect = モバイル接続
+TabDiscord = Discord
 MobileSharingPending = 共有は有効ですが、待ち受けを開始できていません
 MobileSharingListeningHelp = 上のコードをコピーしてスマホ・タブレット・PCを接続できます。待機中はこのPCが接続を受け付ける状態で、端末の接続完了を示すものではありません。アドレスを変えると待受を再起動しますが、鍵は変更しません。
 
@@ -1784,3 +1785,6 @@ QuotaArchiveThirtyDays = 30日
 NativeFeatureWindowsOnly = この機能は現在Windows版のみ対応しています。
 
 MacManualUpdatesHelper = このアプリのリリースページからMac用DMGをダウンロードし、アプリを終了してApplications内のアプリを置き換えてください。
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = アプリの起動中、Discord にステータスを表示します。取得できる場合はサービス名、モデル、effort、速度モード、セッション経過時間、ローカルのトークン使用量を共有します。プロジェクト名・パス・会話は送信しません。トークン表示にはコスト追跡が必要で、検出は推定です。

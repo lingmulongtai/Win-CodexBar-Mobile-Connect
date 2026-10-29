@@ -5,6 +5,43 @@ use chrono::{FixedOffset, Local, NaiveTime, TimeZone};
 use std::io::Write;
 
 #[test]
+fn claude_daily_tokens_accepts_preliminary_rows_superseded_by_final_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let now = Utc::now();
+    let timestamp = now.to_rfc3339();
+    let preliminary = format!(
+        r#"{{"type":"assistant","timestamp":"{timestamp}","requestId":"r1","message":{{"id":"m1","model":"claude-sonnet-4-6","stop_reason":null,"usage":{{"input_tokens":100,"output_tokens":0}}}}}}"#
+    );
+    let final_row = format!(
+        r#"{{"type":"assistant","timestamp":"{timestamp}","requestId":"r1","message":{{"id":"m1","model":"claude-sonnet-4-6","usage":{{"input_tokens":100,"output_tokens":20}}}}}}"#
+    );
+    std::fs::write(&path, format!("{preliminary}\n{final_row}\n")).unwrap();
+    let mut seen = HashSet::new();
+    let mut pricing = ClaudeScanPricingResolver::default();
+    let mut days = HashMap::new();
+    days.insert(today::day_key(cost_bucket_zone().date(now)), 0);
+    let result = scan_claude_file_for_daily_tokens(
+        &path,
+        &(now - Duration::days(1)),
+        &mut seen,
+        &mut pricing,
+        &mut days,
+    );
+    assert!(result.is_complete());
+    assert_eq!(days.values().sum::<u64>(), 120);
+    std::fs::write(&path, format!("{preliminary}\n")).unwrap();
+    let result = scan_claude_file_for_daily_tokens(
+        &path,
+        &(now - Duration::days(1)),
+        &mut HashSet::new(),
+        &mut pricing,
+        &mut days,
+    );
+    assert!(!result.is_complete());
+}
+
+#[test]
 fn test_unknown_model_falls_back_to_sonnet() {
     // Unknown/retired Claude IDs fall back to Sonnet 4.6 base pricing
     // ($3/1M input, $15/1M output). 100k tokens stay under the 200k tier.
