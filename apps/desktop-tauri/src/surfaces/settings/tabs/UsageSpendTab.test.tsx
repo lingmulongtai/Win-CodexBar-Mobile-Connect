@@ -1,17 +1,23 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getUsageSpendSummary: vi.fn(),
+  getCodexAccountUsage: vi.fn(),
+  getSafeDiagnostics: vi.fn(),
   writeUsageSpendExport: vi.fn(),
 }));
+const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
 const peerState = vi.hoisted(() => ({ current: null as import("../../../types/bridge").DesktopPeerStatus | null }));
 vi.mock("../../../hooks/useDesktopPeerStatus", () => ({ useDesktopPeerStatus: () => peerState.current }));
 
 vi.mock("../../../lib/tauri", () => tauriMocks);
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
+  listen: vi.fn().mockImplementation(async (name: string, callback: () => void) => {
+    eventHandlers.set(name, callback);
+    return () => eventHandlers.delete(name);
+  }),
 }));
 
 const EN: Record<string, string> = {
@@ -125,11 +131,161 @@ function stat(label: string, scope: HTMLElement = document.body): string | null 
 describe("UsageSpendTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    eventHandlers.clear();
     peerState.current = null;
+    tauriMocks.getSafeDiagnostics.mockResolvedValue("usage spend stage started");
+    tauriMocks.getCodexAccountUsage.mockResolvedValue({ summary: { lifetimeTokens: 12345678901, peakDailyTokens: null }, dailyUsageBuckets: null });
     tauriMocks.getUsageSpendSummary.mockImplementation(
       async (options?: { period?: string }) => summary(options?.period ?? "rolling:30"),
     );
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  it("discards a previous account response after switching accounts", async () => {
+    let resolveOld!: (value: { summary: { lifetimeTokens: number; peakDailyTokens: null }; dailyUsageBuckets: null }) => void;
+    tauriMocks.getCodexAccountUsage.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ summary: { lifetimeTokens: 222, peakDailyTokens: null }, dailyUsageBuckets: null });
+    renderTab();
+    await waitFor(() => expect(eventHandlers.has("codex-accounts-updated")).toBe(true));
+    act(() => eventHandlers.get("codex-accounts-updated")?.());
+    expect(await screen.findByText(/222/)).toBeInTheDocument();
+    await act(async () => resolveOld({ summary: { lifetimeTokens: 111, peakDailyTokens: null }, dailyUsageBuckets: null }));
+    expect(screen.queryByText(/111/)).not.toBeInTheDocument();
+  });
+
+  it("includes verified partial model costs in the labeled spend total", async () => {
+    const value = summary("month-to-date");
+    value.rows[0].periodCost = 5;
+    value.contract.knownCostUsd = 5;
+    value.contract.priceCoverage.unpriced = 1;
+    value.contract.models = [
+      { ...value.contract.models[0], model: "complete", costUsd: 5 },
+      { ...value.contract.models[0], model: "partial", costUsd: null, partialCostUsd: 10 },
+    ];
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(value);
+    renderTab();
+    await screen.findByText("partial");
+    expect(stat("Estimated spend")).toContain("$18.50");
+    expect(stat("Estimated spend")).toContain("UsageSpendPartialCost");
+  });
+
+  it("opens the redacted diagnostic log on request", async () => {
+    renderTab();
+    fireEvent.click(screen.getByText("UsageSpendDiagnostics"));
+    expect(await screen.findByText("usage spend stage started")).toBeInTheDocument();
+  });
+
+  it("shows the account lifetime total separately from local usage", async () => {
+    renderTab();
+    expect(await screen.findByText(/12,345,678,901/)).toBeInTheDocument();
+    expect(screen.getByText("CodexAccountUsageCaption")).toBeInTheDocument();
+  });
+
+  it("publishes the first result and coalesces updates arriving while scans run", async () => {
+    let resolveFirst!: (value: UsageSpendSummary) => void;
+    let resolveSecond!: (value: UsageSpendSummary) => void;
+    tauriMocks.getUsageSpendSummary
+      .mockImplementationOnce(() => new Promise<UsageSpendSummary>((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<UsageSpendSummary>((resolve) => { resolveSecond = resolve; }));
+    renderTab();
+    await waitFor(() => expect(eventHandlers.has("provider-updated")).toBe(true));
+    act(() => { eventHandlers.get("provider-updated")?.(); eventHandlers.get("provider-updated")?.(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveFirst(summary("month-to-date")); });
+    await screen.findByText("USD");
+    expect(screen.getByRole("button", { name: /UsageSpendLoading/ })).toBeDisabled();
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+
+    act(() => { eventHandlers.get("provider-updated")?.(); eventHandlers.get("provider-updated")?.(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveSecond(summary("month-to-date")); });
+    await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("button", { name: /UsageSpendRefresh/ })).toBeEnabled();
+  });
+
+  it("distinguishes a paused history scan from an active refresh", async () => {
+    const value = summary("month-to-date");
+    value.rows[0].refreshing = true;
+    value.rows[0].historyPaused = true;
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(value);
+    renderTab();
+    expect(await screen.findByText(/UsageSpendPaused/)).toBeInTheDocument();
+  });
+
+  it("retries an incomplete history after a transient silent failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = summary("month-to-date");
+      pending.rows[0].refreshing = true;
+      const finished = summary("month-to-date");
+      tauriMocks.getUsageSpendSummary
+        .mockResolvedValueOnce(pending)
+        .mockRejectedValueOnce(new Error("temporary failure"))
+        .mockResolvedValueOnce(finished);
+      await act(async () => { renderTab(); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(screen.getByText("temporary failure")).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText("temporary failure")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks completed history at a low frequency", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { renderTab(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(299_999); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the previous period visible while a new period loads and restores a cached period", async () => {
+    let finish90!: (value: UsageSpendSummary) => void;
+    const pending90 = new Promise<UsageSpendSummary>((resolve) => { finish90 = resolve; });
+    tauriMocks.getUsageSpendSummary.mockImplementation((options?: { period?: string }) =>
+      options?.period === "rolling:90" ? pending90 : Promise.resolve({ ...summary(options?.period ?? "rolling:30"), contract: { ...contract("rolling:30"), models: [{ ...contract("rolling:30").models[0], model: "previous-model" }] } }));
+    const set = vi.fn();
+    const props = { settings: { spendDashboardPeriod: "rolling:30" } as SettingsSnapshot, set, saving: false };
+    const { rerender } = render(<UsageSpendTab {...props} />);
+    await screen.findByText("previous-model");
+    rerender(<UsageSpendTab {...props} settings={{ ...props.settings, spendDashboardPeriod: "rolling:90" }} />);
+    expect(screen.getByText("previous-model")).toBeInTheDocument();
+    expect(screen.getByText("UsageSpendPreviousPeriod")).toBeInTheDocument();
+    const next = summary("rolling:90");
+    next.contract.models[0].model = "next-model";
+    await act(async () => finish90(next));
+    await screen.findByText("next-model");
+    rerender(<UsageSpendTab {...props} />);
+    expect(await screen.findByText("previous-model")).toBeInTheDocument();
+  });
+
+  it("does not replace an earlier complete period with an in-progress partial result", async () => {
+    tauriMocks.getUsageSpendSummary.mockImplementation(async (options?: { period?: string }) => {
+      const result = summary(options?.period ?? "rolling:30");
+      result.updatedAt = "2026-10-01T12:00:00Z";
+      result.contract.models[0].model = "previous-model";
+      if (options?.period === "rolling:90") result.rows[0].refreshing = true;
+      return result;
+    });
+    const props = { settings: { spendDashboardPeriod: "rolling:30" } as SettingsSnapshot, set: vi.fn(), saving: false };
+    const { rerender } = render(<UsageSpendTab {...props} />);
+    await screen.findByText("previous-model");
+    expect(screen.getByText(/UsageSpendLastUpdated/)).toBeInTheDocument();
+    rerender(<UsageSpendTab {...props} settings={{ ...props.settings, spendDashboardPeriod: "rolling:90" }} />);
+    await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledWith({ period: "rolling:90", forceRefresh: false }));
+    expect(screen.getByText("previous-model")).toBeInTheDocument();
+    expect(screen.getByText("UsageSpendPreviousPeriod")).toBeInTheDocument();
   });
 
   it("scans the dashboard period, not the menu History window, and saves a new segment", async () => {

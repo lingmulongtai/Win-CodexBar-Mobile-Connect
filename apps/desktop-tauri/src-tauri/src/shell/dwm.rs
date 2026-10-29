@@ -165,6 +165,8 @@ enum Chrome {
     Dark,
     /// Keeps `WS_THICKFRAME` so the native resize affordance still works.
     DarkResizable,
+    /// Resizable detached settings window, opted into Windows 11 rounding.
+    DarkSettings,
     /// The erase color comes from the builder's `background_color`, which
     /// tao paints on `WM_ERASEBKGND`.
     LightPanel,
@@ -185,11 +187,11 @@ const PANEL_HAIRLINE: u32 = colorref(0x8A, 0x8B, 0x8E);
 #[cfg(windows)]
 impl Chrome {
     fn keeps_resize_frame(self) -> bool {
-        self == Self::DarkResizable
+        matches!(self, Self::DarkResizable | Self::DarkSettings)
     }
 
     fn corner_preference(self) -> Option<u32> {
-        (self == Self::LightPanel).then_some(DWMWCP_ROUND)
+        matches!(self, Self::LightPanel | Self::DarkSettings).then_some(DWMWCP_ROUND)
     }
 
     fn border_color(self) -> Option<u32> {
@@ -209,6 +211,11 @@ pub fn force_dark_caption(win: &tauri::WebviewWindow) {
 #[cfg(windows)]
 pub fn force_dark_caption_resizable(win: &tauri::WebviewWindow) {
     apply_chrome(win, Chrome::DarkResizable);
+}
+
+#[cfg(windows)]
+pub fn settings_chrome(win: &tauri::WebviewWindow) {
+    apply_chrome(win, Chrome::DarkSettings);
 }
 
 #[cfg(windows)]
@@ -337,6 +344,9 @@ pub fn force_dark_caption(_win: &tauri::WebviewWindow) {}
 pub fn force_dark_caption_resizable(_win: &tauri::WebviewWindow) {}
 
 #[cfg(not(windows))]
+pub fn settings_chrome(_win: &tauri::WebviewWindow) {}
+
+#[cfg(not(windows))]
 pub fn light_panel_chrome(_win: &tauri::WebviewWindow) {}
 
 #[cfg(all(test, windows))]
@@ -350,19 +360,22 @@ mod tests {
     }
 
     #[test]
-    fn only_the_light_panel_rounds_and_recolors_its_border() {
+    fn settings_and_light_panel_request_rounded_corners() {
         assert_eq!(Chrome::LightPanel.corner_preference(), Some(2));
         assert_eq!(Chrome::LightPanel.border_color(), Some(0x008E_8B8A));
         assert_eq!(Chrome::Dark.corner_preference(), None);
         assert_eq!(Chrome::Dark.border_color(), None);
         assert_eq!(Chrome::DarkResizable.corner_preference(), None);
+        assert_eq!(Chrome::DarkSettings.corner_preference(), Some(2));
+        assert_eq!(Chrome::DarkSettings.border_color(), None);
         assert_eq!(Chrome::DarkResizable.border_color(), None);
     }
 
     #[test]
-    fn only_the_resizable_dark_chrome_keeps_the_resize_frame() {
+    fn resizable_dark_windows_keep_the_resize_frame() {
         assert!(!Chrome::LightPanel.keeps_resize_frame());
         assert!(!Chrome::Dark.keeps_resize_frame());
         assert!(Chrome::DarkResizable.keeps_resize_frame());
+        assert!(Chrome::DarkSettings.keeps_resize_frame());
     }
 }

@@ -461,9 +461,6 @@ impl CodexParserState {
             let day_key = parsed_timestamp
                 .as_ref()
                 .map(ParsedCodexTimestamp::day_key)
-                .filter(|day_key| {
-                    CostUsageDayRange::is_in_range(day_key, &range.since_key, &range.until_key)
-                })
                 .or_else(|| {
                     self.records
                         .last()
@@ -526,19 +523,15 @@ impl CodexParserState {
             // range filter so a cached prefix remains safe to extend.
             self.observe_token_timestamp(timestamp, parsed_timestamp.as_ref());
         }
-        let Some(day_key) = parsed_timestamp
-            .as_ref()
-            .map(ParsedCodexTimestamp::day_key)
-            .filter(|day_key| {
-                CostUsageDayRange::is_in_range(day_key, &range.since_key, &range.until_key)
-            })
-        else {
-            return;
-        };
         if obj.get("type").and_then(|v| v.as_str()) == Some("turn_context") {
             self.update_current_model(&obj);
+            return;
         }
-
+        let Some(day_key) = parsed_timestamp.as_ref().map(ParsedCodexTimestamp::day_key) else {
+            return;
+        };
+        // Cumulative counters outside the requested window still establish
+        // the baseline for later in-window records. record_usage filters rows.
         if is_token_count {
             self.record_token_count(
                 &obj,
@@ -575,9 +568,6 @@ impl CodexParserState {
                     return;
                 };
                 let day_key = parsed_timestamp.day_key();
-                if !CostUsageDayRange::is_in_range(&day_key, &range.since_key, &range.until_key) {
-                    return;
-                }
                 self.record_fast_token_count(
                     payload,
                     day_key,

@@ -45,6 +45,7 @@ struct ModelAccumulator {
     cache_creation: u64,
     total: Option<u64>,
     cost: Option<f64>,
+    incomplete: bool,
     custom_pricing: bool,
 }
 
@@ -297,6 +298,8 @@ fn aggregate_with_pricing(
         }
         if let Some(cost) = cost {
             model.cost = Some(model.cost.unwrap_or(0.0) + cost);
+        } else {
+            model.incomplete = true;
         }
         model.custom_pricing |= pricing.custom.is_some();
     }
@@ -305,7 +308,8 @@ fn aggregate_with_pricing(
         .into_iter()
         .map(|(model, acc)| SpendModelRow {
             model,
-            cost_usd: acc.cost,
+            cost_usd: if acc.incomplete { None } else { acc.cost },
+            partial_cost_usd: if acc.incomplete { acc.cost } else { None },
             input_tokens: acc.input,
             output_tokens: acc.output,
             cache_read_tokens: acc.cache_read,

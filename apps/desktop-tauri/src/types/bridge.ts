@@ -248,10 +248,14 @@ export interface DiscordPresenceOptions {
   showToday: boolean;
   showWeek: boolean;
   showMonth: boolean;
+  showCodexLifetime: boolean;
   showGithub: boolean;
   githubUrl: string;
   showEmoji: boolean;
   imageUrl: string;
+  petUrl: string;
+  petIdleMotion: string;
+  petActiveMotion: string;
 }
 
 export interface SettingsSnapshot {
@@ -606,6 +610,8 @@ export interface UsageSpendRow {
   daily?: UsageSpendDailyPoint[];
   /** F8: true when served from stale cache while a re-scan is in progress. */
   refreshing?: boolean;
+  /** Local history catch-up is paused instead of actively updating. */
+  historyPaused?: boolean;
   /** ISO 8601 timestamp of the stale snapshot when refreshing. */
   staleUpdatedAt?: string;
 }
@@ -622,6 +628,8 @@ export interface UsageSpendSummary {
   reportingPeriod: string;
   reportingDay: string;
   dashboardTimezone: string;
+  /** UTC time the displayed snapshot was produced. */
+  updatedAt?: string | null;
   /** False when "Track costs" is off: nothing was scanned and the summary is empty. */
   costTrackingEnabled?: boolean;
   /** The last year of per-day tokens per local-log row, independent of the period. */
@@ -709,6 +717,7 @@ export interface SpendTokenMix {
 export interface SpendModelRow {
   model: string;
   costUsd: number | null;
+  partialCostUsd?: number | null;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

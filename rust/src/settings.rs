@@ -120,10 +120,14 @@ pub struct DiscordPresenceOptions {
     pub show_today: bool,
     pub show_week: bool,
     pub show_month: bool,
+    pub show_codex_lifetime: bool,
     pub show_github: bool,
     pub github_url: String,
     pub show_emoji: bool,
     pub image_url: String,
+    pub pet_url: String,
+    pub pet_idle_motion: String,
+    pub pet_active_motion: String,
 }
 
 impl Default for DiscordPresenceOptions {
@@ -138,10 +142,14 @@ impl Default for DiscordPresenceOptions {
             show_today: true,
             show_week: true,
             show_month: true,
+            show_codex_lifetime: false,
             show_github: true,
             github_url: String::new(),
             show_emoji: true,
             image_url: String::new(),
+            pet_url: String::new(),
+            pet_idle_motion: "idle".into(),
+            pet_active_motion: "running".into(),
         }
     }
 }

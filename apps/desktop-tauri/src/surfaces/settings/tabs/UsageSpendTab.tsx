@@ -6,9 +6,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useLocale } from "../../../hooks/useLocale";
 import { Field, Toggle } from "../../../components/FormControls";
 import { UsageSpendDailyLedger } from "../../../components/UsageSpendDailyLedger";
-import { getUsageSpendSummary, writeUsageSpendExport } from "../../../lib/tauri";
+import { getCodexAccountUsage, getSafeDiagnostics, getUsageSpendSummary, writeUsageSpendExport } from "../../../lib/tauri";
 import { formatUsd, shareUsageSpendPng } from "../../../lib/usageSpendSharing";
-import { buildSpendProviderRowGroups } from "../../../lib/usageSpendBreakdown";
+import { buildSpendProviderRowGroups, providerKnownSubtotal } from "../../../lib/usageSpendBreakdown";
 import {
   SPEND_DASHBOARD_PERIODS,
   formatCompactTokens,
@@ -44,6 +44,7 @@ import { mergeTokenActivity, type TokenActivityPoint } from "../../../lib/tokenA
 type Translate = (key: LocaleKey) => string;
 type BreakdownView = "providers" | "projects" | "sessions";
 
+
 /**
  * Settings > Usage & Spend, laid out like the macOS pane: header and refresh,
  * the time range, the per-currency stat strip, token mix and coverage, the
@@ -57,22 +58,69 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
   const peer = useDesktopPeerStatus();
   const isRemote = Boolean(peer?.selectedId);
+  const summaries = useRef(new Map<string, UsageSpendSummary>()).current;
   const requestRef = useRef(0);
+  const activeRequestRef = useRef<number | null>(null);
+  const refreshQueuedRef = useRef(false);
   const period = normalizeCostPeriod(settings.spendDashboardPeriod ?? settings.costReportingPeriod);
   const trackCosts = settings.costUsageEnabled ?? true;
   const includeOpenCodex = settings.openCodexUsageLogsEnabled ?? false;
   const hideNativeCodex = settings.hideNativeCodexCostWhenOpenCodexPresent ?? false;
+  const scope = JSON.stringify([peer?.sourceId ?? "local", trackCosts, includeOpenCodex, hideNativeCodex,
+    settings.hidePersonalInfo, settings.codexCustomSessionsDirs ?? [], [...(settings.enabledProviders ?? [])].sort()]);
+  const cacheKey = `${scope}|${period}`;
+  const scopeRef = useRef(scope);
   const hiddenKey = normalizeHiddenSourceIds(settings.spendDashboardHiddenSourceIds ?? []).join(",");
   const hidden = useMemo(() => (hiddenKey ? hiddenKey.split(",") : []), [hiddenKey]);
 
+  const [diagnostics, setDiagnostics] = useState<string | null>(null);
+  const refreshDiagnostics = () => {
+    void getSafeDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(t("DiagnosticsCopyFailed")));
+  };
+  const [accountLifetime, setAccountLifetime] = useState<number | null>(null);
+  const [accountUnavailable, setAccountUnavailable] = useState(false);
+  useEffect(() => {
+    if (isRemote) return;
+    let cancelled = false;
+    let generation = 0;
+    let unlisten: UnlistenFn | undefined;
+    const refresh = (accountChanged = false) => {
+      const request = ++generation;
+      if (accountChanged) { setAccountLifetime(null); setAccountUnavailable(false); }
+      void getCodexAccountUsage().then((usage) => {
+        if (!cancelled && request === generation) {
+          setAccountLifetime(usage.summary.lifetimeTokens);
+          setAccountUnavailable(usage.summary.lifetimeTokens == null);
+        }
+      }).catch(() => { if (!cancelled && request === generation) { setAccountLifetime(null); setAccountUnavailable(true); } });
+    };
+    void listen("codex-accounts-updated", () => refresh(true)).then((stop) => {
+      if (cancelled) stop(); else unlisten = stop;
+    }).catch(() => {});
+    refresh();
+    const timer = setInterval(() => refresh(), 300_000);
+    return () => { cancelled = true; generation++; clearInterval(timer); unlisten?.(); };
+  }, [isRemote]);
+
   const [summary, setSummary] = useState<UsageSpendSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [backgroundPending, setBackgroundPending] = useState(false);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [view, setView] = useState<BreakdownView>("providers");
 
-  const load = useCallback(async (forceRefresh = false, silent = false) => {
+  const load: (forceRefresh?: boolean, silent?: boolean) => Promise<void> = useCallback(async (forceRefresh = false, silent = false) => {
+    // A burst of provider events must not supersede every in-flight request:
+    // publish its result, then perform one coalesced silent refresh.
+    if (silent && activeRequestRef.current !== null) {
+      refreshQueuedRef.current = true;
+      return;
+    }
     const request = ++requestRef.current;
+    activeRequestRef.current = request;
+    setUpdating(true);
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -80,21 +128,59 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
     try {
       const data = await getUsageSpendSummary({ period, forceRefresh });
       if (request !== requestRef.current) return;
-      setSummary(data);
+      const pending = data.rows.some((row) => row.refreshing && !row.historyPaused);
+      if (!pending) {
+        if (summaries.size >= 20 && !summaries.has(cacheKey)) summaries.delete(summaries.keys().next().value!);
+        summaries.set(cacheKey, data);
+      }
+      setBackgroundPending(pending);
+      setSummary((current) => pending && current && current.reportingPeriod !== data.reportingPeriod ? current : data);
+      if (pending) {
+        setRetryGeneration((generation) => silent ? generation + 1 : 0);
+      } else {
+        setRetryGeneration(0);
+      }
       if (silent) setError(null);
     } catch (err: unknown) {
-      if (!silent && request === requestRef.current) setError(err instanceof Error ? err.message : String(err));
+      if (request === requestRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+        if (silent) setRetryGeneration((generation) => generation + 1);
+      }
     } finally {
-      if (!silent && request === requestRef.current) setLoading(false);
+      if (request === requestRef.current) {
+        activeRequestRef.current = null;
+        setUpdating(false);
+        setLoading(false);
+        if (refreshQueuedRef.current) {
+          refreshQueuedRef.current = false;
+          void load(false, true);
+        }
+      }
     }
     // The OpenCodex flags and Track costs change what the backend scans.
-  }, [peer?.sourceId, period, trackCosts, includeOpenCodex, hideNativeCodex]);
+  }, [peer?.sourceId, period, trackCosts, includeOpenCodex, hideNativeCodex, cacheKey]);
 
   useEffect(() => {
-    setSummary(null);
-    void load(false);
-    return () => { requestRef.current++; };
-  }, [load]);
+    const cached = summaries.get(cacheKey);
+    const sameScope = scopeRef.current === scope;
+    scopeRef.current = scope;
+    setBackgroundPending(false);
+    setSummary((previous) => cached ?? (sameScope ? previous : null));
+    void load(false, Boolean(cached));
+    return () => {
+      requestRef.current++;
+      activeRequestRef.current = null;
+      refreshQueuedRef.current = false;
+    };
+  }, [load, cacheKey, scope]);
+
+  useEffect(() => {
+    if (!summary?.costTrackingEnabled) return;
+    const pending = backgroundPending || summary.rows.some((row) => row.refreshing && !row.historyPaused);
+    const delay = pending ? Math.min(10_000 * 2 ** Math.min(retryGeneration, 4), 120_000) : 300_000;
+    const timer = setTimeout(() => void load(false, true), delay);
+    return () => clearTimeout(timer);
+  }, [load, summary, retryGeneration, backgroundPending]);
 
   // Upstream 0.55.0 #3106 parity: provider token/cost publications refresh the
   // pane silently while it is open. A settings save (Track costs, OpenCodex)
@@ -110,7 +196,19 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
         if (!cancelled) void load(false, true);
       }, 200);
     };
-    for (const event of ["provider-updated", "settings-changed", "desktop-peer-changed"]) {
+    const scopeChanged = () => {
+      summaries.clear();
+      requestRef.current++;
+      activeRequestRef.current = null;
+      refreshQueuedRef.current = false;
+      setSummary(null);
+      setBackgroundPending(false);
+      schedule();
+    };
+    void listen("usage-spend-scope-changed", scopeChanged).then((fn) => {
+      if (cancelled) fn(); else unlisteners.push(fn);
+    }).catch(() => {});
+    for (const event of ["provider-updated", "settings-changed", "desktop-peer-changed", "usage-spend-updated"]) {
       void listen(event, schedule)
         .then((fn) => {
           if (cancelled) fn();
@@ -126,6 +224,7 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   }, [load]);
 
   const tracking = (isRemote || trackCosts) && summary?.costTrackingEnabled !== false;
+  const pendingSummary = backgroundPending || (summary?.rows.some((row) => row.refreshing && !row.historyPaused) ?? false);
   const visible = useMemo(
     () => (summary && tracking ? visibleUsageSpendSummary(summary, hidden) : null),
     [summary, tracking, hidden],
@@ -184,7 +283,7 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   }, [exportJson, visible, t]);
 
   const sources = spendSources(summary, hidden);
-  const exportsDisabled = loading || !visible;
+  const exportsDisabled = loading || !visible || (!isRemote && visible.reportingPeriod !== period);
 
   return (
     <section className="settings-section usage-spend">
@@ -196,12 +295,22 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
         <button
           type="button"
           className="credential-btn credential-btn--secondary usage-spend__refresh"
-          disabled={loading || !trackCosts}
+          disabled={updating || !trackCosts}
           onClick={() => void load(true)}
         >
-          <span aria-hidden="true">↻</span> {loading ? t("UsageSpendLoading") : t("UsageSpendRefresh")}
+          <span aria-hidden="true" className={updating ? "spin" : undefined}>↻</span> {updating ? t("UsageSpendLoading") : t("UsageSpendRefresh")}
         </button>
       </div>
+
+      {summary?.updatedAt && <p className="settings-section__caption">{t("UsageSpendLastUpdated")}: {new Date(summary.updatedAt).toLocaleString()}</p>}
+      {summary && (updating || pendingSummary || (summary.reportingPeriod !== period && !isRemote)) && <p className="settings-section__caption" role="status">{summary.reportingPeriod !== period && !isRemote ? t("UsageSpendPreviousPeriod") : t("UsageSpendRefreshing")}</p>}
+
+      {!isRemote && (accountLifetime !== null || accountUnavailable) && (
+        <div className="usage-spend__card" role="status">
+          <strong>{t("CodexAccountLifetime")}: {accountLifetime === null ? "—" : accountLifetime.toLocaleString()}</strong>
+          <p className="settings-section__caption">{t(accountUnavailable ? "CodexAccountUsageUnavailable" : "CodexAccountUsageCaption")}</p>
+        </div>
+      )}
 
       <DesktopPeerBanner status={peer} />
       {isRemote && <p className="settings-section__caption">{t("DesktopPeerDataHelp")}</p>}
@@ -236,6 +345,12 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
           />
         )
       )}
+
+      <details className="usage-spend__controls" onToggle={(event) => { if (event.currentTarget.open) refreshDiagnostics(); }}>
+        <summary>{t("UsageSpendDiagnostics")}</summary>
+        <button type="button" className="credential-btn credential-btn--secondary" onClick={refreshDiagnostics}>{t("UsageSpendDiagnosticsRefresh")}</button>
+        {diagnostics && <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "16rem", overflow: "auto" }}>{diagnostics}</pre>}
+      </details>
 
       <details className="usage-spend__controls" open>
         <summary>{t("UsageSpendDataControls")}</summary>
@@ -380,8 +495,14 @@ function DashboardBody({
   hidePersonalInfo: boolean;
   t: Translate;
 }) {
-  const totals = spendTotalsByCurrency(summary.rows);
   const contract = summary.contract;
+  const hasPartialModels = contract.models.some((model) => model.partialCostUsd != null);
+  const hasPartialProvider = !contractHidden && hasPartialModels && summary.rows.some((row) => row.providerId === contract.providerId);
+  const hasIncompleteProvider = !contractHidden && (contract.priceCoverage.unpriced > 0 || contract.priceCoverage.unmetered > 0)
+    && summary.rows.some((row) => row.providerId === contract.providerId);
+  const rowsForTotals = hasPartialProvider ? summary.rows.map((row) => row.providerId === contract.providerId
+    ? { ...row, periodCost: providerKnownSubtotal(contract) } : row) : summary.rows;
+  const totals = spendTotalsByCurrency(rowsForTotals);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const views: { id: BreakdownView; label: string }[] = [
     { id: "providers", label: t("UsageSpendViewProviders") },
@@ -397,7 +518,7 @@ function DashboardBody({
           <h4 className="usage-spend__currency-code">{entry.currency}</h4>
           <p className="settings-section__caption">{t("UsageSpendLocalHistory")}</p>
           <dl className="usage-spend__strip">
-            <Stat label={t("UsageSpendEstimatedSpend")} value={formatUsd(entry.cost, entry.currency)} large />
+            <Stat label={t("UsageSpendEstimatedSpend")} value={`${formatUsd(entry.cost, entry.currency)}${hasIncompleteProvider && entry.currency === "USD" ? ` · ${t("UsageSpendPartialCost")}` : ""}`} large />
             <Stat label={t("UsageSpendTrackedTokens")} value={formatCompactTokens(entry.tokens)} large />
             <Stat label={t("UsageSpendSources")} value={entry.sources.toLocaleString()} large />
           </dl>
@@ -446,9 +567,10 @@ function DashboardBody({
           ))}
       </div>
 
-      {summary.trend && summary.trend.sources.length > 0 && (
+      {summary.trend && summary.trend.sources.length > 0 && <>
+        {summary.rows.some((row) => row.refreshing) && <p className="settings-section__caption">{t("UsageSpendTrendStale")}</p>}
         <UsageSpendTrendPanel trend={summary.trend} t={t} renderSourceIcon={renderSpendSourceIcon} />
-      )}
+      </>}
       {!contractHidden && <UsageSpendDailyLedger daily={contract.daily} />}
     </>
   );

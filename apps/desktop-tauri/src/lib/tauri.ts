@@ -343,6 +343,15 @@ export function getProviderLocalUsageSummary(
 }
 
 /** `period` is a raw reporting period; omitted means the saved `costReportingPeriod`. */
+export interface CodexAccountUsage {
+  summary: { lifetimeTokens: number | null; peakDailyTokens: number | null };
+  dailyUsageBuckets: Array<{ startDate: string; tokens: number }> | null;
+}
+
+export function getCodexAccountUsage(): Promise<CodexAccountUsage> {
+  return invoke<CodexAccountUsage>("get_codex_account_usage");
+}
+
 export function getUsageSpendSummary(options?: { period?: string; forceRefresh?: boolean }): Promise<UsageSpendSummary> {
   return invoke<UsageSpendSummary>("get_usage_spend_summary", {
     period: options?.period ?? null,

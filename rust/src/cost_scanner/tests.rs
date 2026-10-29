@@ -2867,7 +2867,7 @@ fn incomplete_summary_preserves_previous_report_and_marks_it_non_authoritative()
 }
 
 #[test]
-fn failed_catch_up_pause_preserves_cursor_and_report_until_explicit_refresh() {
+fn failed_catch_up_resumes_when_the_source_returns() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
     let cache_root = root.path().join("cache");
@@ -2915,16 +2915,11 @@ fn failed_catch_up_pause_preserves_cursor_and_report_until_explicit_refresh() {
         .with_sessions_dirs(vec![sessions.clone()]);
     let (background_summary, background_stats, background_cache) =
         background.scan_codex_detailed_with_cache(None);
-    assert_eq!(background_stats.files_parsed, 0);
-    assert_eq!(background_summary.total_cost_usd, report.total_cost_usd);
-    assert_eq!(
-        background_cache.codex_pending_paths,
-        failed_cache.codex_pending_paths
-    );
-    assert_eq!(
-        background_cache.codex_scan_pause_reason,
-        failed_cache.codex_scan_pause_reason
-    );
+    assert_eq!(background_stats.files_parsed, 1);
+    assert_eq!(background_summary.input_tokens, 100);
+    assert!(background_cache.codex_pending_paths.is_empty());
+    assert!(background_cache.codex_scan_pause_reason.is_none());
+    assert!(background_cache.previous_report.is_none());
 
     let explicit = CostScanner::new(7)
         .with_options(CostScanOptions::app_driven())
@@ -2970,12 +2965,24 @@ fn missing_unobserved_sessions_root_does_not_pause_validated_cache() {
 }
 
 #[test]
-fn trace_pruning_preserves_cursor_and_validated_history_until_refresh() {
+fn shrunk_trace_rebuilds_automatically_while_preserving_the_previous_report() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
     let cache_root = root.path().join("cache");
     let path = write_codex_session_fixture(&sessions, "pruned.jsonl", 100);
 
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(
+            format!(
+                "{{\"type\":\"padding\",\"pad\":\"{}\"}}\n",
+                "x".repeat(1000)
+            )
+            .as_bytes(),
+        )
+        .unwrap();
     let initial = CostScanner::new(7)
         .with_options(CostScanOptions::app_driven())
         .with_cache_root(&cache_root)
@@ -2989,17 +2996,19 @@ fn trace_pruning_preserves_cursor_and_validated_history_until_refresh() {
     let mut initial_cache = JsonlScanner::load_cache(ProviderId::Codex, Some(&cache_root));
     initial_cache.last_scan_unix_ms = 1;
     JsonlScanner::save_cache(ProviderId::Codex, &mut initial_cache, Some(&cache_root));
-    let _ = write_codex_session_fixture(&sessions, "pruned.jsonl", 1);
+    let _ = write_codex_session_fixture_with_inputs(&sessions, "pruned.jsonl", &[1, 2]);
 
+    let options = CostScanOptions {
+        codex_max_scan_bytes_per_refresh: 1,
+        ..CostScanOptions::default()
+    };
     let background = CostScanner::new(7)
+        .with_options(options)
         .with_cache_root(&cache_root)
         .with_sessions_dirs(vec![sessions.clone()]);
     let (paused_summary, _, paused_cache) = background.scan_codex_detailed_with_cache(None);
     assert_eq!(paused_summary.input_tokens, 100);
-    assert_eq!(
-        paused_cache.codex_scan_pause_reason,
-        Some(CodexScanPauseReason::NoProgress)
-    );
+    assert!(paused_cache.codex_scan_incomplete);
     assert_eq!(
         paused_cache.codex_pending_paths,
         vec![path.to_string_lossy().to_string()]
@@ -3007,11 +3016,10 @@ fn trace_pruning_preserves_cursor_and_validated_history_until_refresh() {
     assert!(paused_cache.previous_report.is_some());
 
     let explicit = CostScanner::new(7)
-        .with_options(CostScanOptions::app_driven())
         .with_cache_root(&cache_root)
         .with_sessions_dirs(vec![sessions]);
     let (resumed_summary, _, resumed_cache) = explicit.scan_codex_detailed_with_cache(None);
-    assert_eq!(resumed_summary.input_tokens, 1);
+    assert_eq!(resumed_summary.input_tokens, 2);
     assert!(resumed_cache.codex_scan_pause_reason.is_none());
     assert!(resumed_cache.codex_pending_paths.is_empty());
     assert!(resumed_cache.previous_report.is_none());
@@ -3031,6 +3039,92 @@ fn pending_codex_options(force: bool) -> CostScanOptions {
     };
     options.codex_candidate_limit = 1;
     options
+}
+
+#[test]
+fn widened_codex_catch_up_makes_progress_across_reopened_scans() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let cache_root = root.path().join("cache");
+    for index in 0..8 {
+        let path =
+            write_codex_session_fixture(&sessions, &format!("range-{index}.jsonl"), 100 + index);
+        let old_timestamp = (recent_codex_fixture_time() - Duration::days(12)).to_rfc3339();
+        let old_row = format!(
+            r#"{{"timestamp":"{old_timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"model":"gpt-5","total_token_usage":{{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1}}}}}}}}
+"#
+        );
+        let current = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{old_row}{current}")).unwrap();
+        if index < 3 {
+            std::fs::write(path.with_file_name(format!("empty-{index}.jsonl")), b"").unwrap();
+        }
+    }
+    let reference = CostScanner::new(30)
+        .with_cache_root(root.path().join("reference"))
+        .with_sessions_dirs(vec![sessions.clone()])
+        .scan_codex();
+    assert!(reference.history_coverage_established);
+    let mut old = CostUsageCache {
+        scan_since_key: Some("2000-01-01".to_string()),
+        scan_until_key: Some("2000-01-31".to_string()),
+        ..CostUsageCache::default()
+    };
+    JsonlScanner::save_cache(ProviderId::Codex, &mut old, Some(&cache_root));
+    let options = CostScanOptions {
+        codex_candidate_limit: 1,
+        ..CostScanOptions::default()
+    };
+    let mut complete = None;
+    for iteration in 0..40 {
+        let days = if iteration % 2 == 0 { 30 } else { 7 };
+        let (summary, _, cache) = CostScanner::new(days)
+            .with_options(options)
+            .with_cache_root(&cache_root)
+            .with_sessions_dirs(vec![sessions.clone()])
+            .scan_codex_detailed_with_cache(None);
+        if !cache.codex_scan_incomplete && days == 30 {
+            complete = Some(summary);
+            break;
+        }
+    }
+    let complete = complete.expect("bounded catch-up must eventually complete");
+    assert!(complete.history_coverage_established);
+    assert_eq!(complete.input_tokens, reference.input_tokens);
+    assert_eq!(complete.output_tokens, reference.output_tokens);
+    assert_eq!(complete.by_model.len(), reference.by_model.len());
+    for (model, cost) in &reference.by_model {
+        assert!((complete.by_model[model] - cost).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn codex_cost_uses_per_request_context_tiers_not_the_daily_sum() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    for index in 0..2 {
+        let path = write_codex_session_fixture(&sessions, &format!("tier-{index}.jsonl"), 200_000);
+        let content = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("gpt-5", "gpt-5.6-sol")
+            .replace("\"total_token_usage\":", "\"last_token_usage\":{\"input_tokens\":200000,\"cached_input_tokens\":0,\"output_tokens\":5},\"total_token_usage\":");
+        std::fs::write(path, content).unwrap();
+    }
+    let scanner = CostScanner::new(7)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(root.path().join("cache"))
+        .with_sessions_dirs(vec![sessions]);
+    let summary = scanner.scan_codex();
+    let date = cost_bucket_zone().date(Utc::now());
+    let each =
+        CostUsagePricing::codex_cost_usd_at_date("gpt-5.6-sol", 200_000, 0, 5, date).unwrap();
+    let combined =
+        CostUsagePricing::codex_cost_usd_at_date("gpt-5.6-sol", 400_000, 0, 10, date).unwrap();
+    assert!(combined > each * 2.0);
+    assert!((summary.total_cost_usd - each * 2.0).abs() < 1e-9);
+    assert!(!summary.model_pricing_completeness.is_partial());
+    let cached = scanner.scan_codex();
+    assert!((cached.total_cost_usd - each * 2.0).abs() < 1e-9);
 }
 
 #[test]
@@ -3176,7 +3270,7 @@ fn pending_codex_scan_incompatible_root_timezone_or_end_resets_start() {
 }
 
 #[test]
-fn pending_codex_scan_force_rescan_resets_start() {
+fn forced_codex_refresh_resumes_the_same_wide_catch_up() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
     let cache_root = root.path().join("cache");
@@ -3197,10 +3291,14 @@ fn pending_codex_scan_force_rescan_resets_start() {
         .with_sessions_dirs(vec![sessions]);
     let (_, _, forced_cache) = forced.scan_codex_detailed_with_cache(None);
     assert!(forced_cache.codex_scan_incomplete);
+    assert!(forced_cache.files.len() > first_cache.files.len());
     assert_eq!(
         forced_cache.codex_pending_scan_since_key.as_deref(),
-        Some(expected_codex_scan_start(7).as_str())
+        Some(expected_codex_scan_start(30).as_str())
     );
+    let (done, _, completed_cache) = forced.scan_codex_detailed_with_cache(None);
+    assert!(!completed_cache.codex_scan_incomplete);
+    assert_eq!(done.input_tokens, 303);
 }
 
 #[test]
@@ -3742,4 +3840,28 @@ fn isolated_presence_cache_is_scoped_to_roots_and_zone() {
     assert!(
         isolated_presence_cache_root(dir.path(), &[dir.path().join("missing")], "UTC").is_none()
     );
+}
+
+#[test]
+fn cumulative_only_codex_usage_does_not_invent_a_long_request_price() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let path = write_codex_session_fixture(&sessions, "cumulative.jsonl", 400_000);
+    let content = fs::read_to_string(&path)
+        .unwrap()
+        .replace("gpt-5", "gpt-5.6-sol");
+    fs::write(&path, &content).unwrap();
+    let scanner = CostScanner::new(7)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(root.path().join("cache"))
+        .with_sessions_dirs(vec![sessions]);
+    let summary = scanner.scan_codex();
+    assert_eq!(summary.input_tokens, 400_000);
+    assert!(summary.model_pricing_completeness.is_partial());
+    assert_eq!(summary.published_cost_usd("codex"), None);
+    let proven = content.replace("\"total_token_usage\":", "\"last_token_usage\":{\"input_tokens\":400000,\"cached_input_tokens\":0,\"output_tokens\":5},\"total_token_usage\":");
+    fs::write(path, proven).unwrap();
+    let summary = scanner.scan_codex();
+    assert!(!summary.model_pricing_completeness.is_partial());
+    assert!(summary.total_cost_usd > 0.0);
 }

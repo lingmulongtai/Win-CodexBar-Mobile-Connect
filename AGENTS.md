@@ -94,6 +94,7 @@ pnpm run tauri:build
 - Keep provider data siloed: never show identity / plan / email from provider A in provider B UI.
 - Secrets (manual cookies, API keys, token accounts): use existing redaction, `secure_file`, and keyring helpers.
 - Do not add dependencies or tooling without confirmation.
+- Advance the visible app version and build number when distributing an updated build. Keep Cargo, Tauri, desktop package, lockfile, and version.env aligned; use a distinct prerelease version for local development builds so the corresponding stable release can still be detected by the updater. Preserve historical release references.
 - Do not open issues or PRs against upstream `steipete/CodexBar` unless the user explicitly asks. This repo is Win-CodexBar only.
 - **GitHub write safety:** for any mutating `gh` command (comment, review, merge, close, edit, create, label, release, etc.), always pass the explicit `--repo owner/repo`; never rely on the current remote or a PR/issue number alone.
 - Before any GitHub mutation, perform a read-back against that same explicit repo and verify the returned owner/repo or URL exactly matches the intended target. Abort on any mismatch.

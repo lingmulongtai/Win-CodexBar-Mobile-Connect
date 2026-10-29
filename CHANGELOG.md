@@ -9,6 +9,13 @@
 
 ## [Windows] Unreleased
 
+- Usage & Spend: retain previous period snapshots during refresh, warm common periods while the app is running, and show when the displayed snapshot was last updated. Known parts of incomplete model estimates remain visible and are labeled partial.
+- Codex API list-price estimates: bundle the published GPT-6 Sol and GPT-6.1 Sol/Terra rates, apply the official long-context threshold, and account for supported Fast rates by model and date. Subscription charges are not calculated.
+- Discord: optionally share the Codex account lifetime and select separate animated Codex Pets motions for idle and active work. The public conversion service receives the chosen public pet name.
+- Discord: fall back to a native process snapshot when Windows process discovery times out, retaining process start times for long-running Codex turns.
+- Show recognized Codex Pro 100 and Claude subscription names, and request Windows 11 rounded corners for the detached Settings window.
+- Use a development version and compare prerelease updates with semantic version ordering; a future stable release of the same version is offered as an update.
+
 - Browser cookies: automatic import reads browsers one at a time and stops at the first session the site accepts. Typesafe, HelmCode, Hyper, Claude (web), OpenCode Go (web), Zed, Notion, and Cursor now move on to the next browser when a signed-out or expired session is rejected, instead of failing on the first browser that had any cookies, and later browsers are not decrypted once a session works. Cookie source Off still never reads a browser (upstream v0.75.0).
 - Ollama: the account email is read only from the settings page header (`id="header-email"`) instead of the first address anywhere on the page, so a footer or support address is no longer shown as the account; a page without that header shows no email (upstream v0.75.0).
 - **Claude**: in Auto mode, a Claude CLI probe timeout now falls back to the retained CLI usage from the last 15 minutes, as other CLI failures already did, instead of failing the refresh outright. Without a retained result the timeout is reported as before.

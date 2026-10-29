@@ -67,7 +67,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
                     <SpendProviderIcon providerId={group.providerId} />
                     <strong>{group.displayName}</strong>
                   </span>
-                  <span>{groupMetric(group, t("UsageSpendTokens"))}</span>
+                  <span>{groupMetric(group, t)}</span>
                   <span aria-hidden="true">{group.models.length === 0 ? "" : isCollapsed ? "▸" : "▾"}</span>
                 </button>
                 {group.row && <RowDetail row={group.row} t={t} />}
@@ -89,7 +89,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
                             {model.customPricing ? " · " + t("UsageSpendCustomPricing") : ""}
                           </span>
                         </span>
-                        <span>{model.costUsd == null ? t("UsageSpendUnpriced") : formatUsd(model.costUsd, "USD")}</span>
+                        <span>{model.costUsd != null ? formatUsd(model.costUsd, "USD") : model.partialCostUsd != null ? `${formatUsd(model.partialCostUsd, "USD")} · ${t("UsageSpendPartialCost")}` : t("UsageSpendUnpriced")}</span>
                       </div>
                     ))}
                     {group.models.length > PROVIDER_MODEL_DISPLAY_LIMIT && (
@@ -116,7 +116,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
 /** Windows detail kept from the old provider table: the fixed 7 and 30 day values and the source. */
 function RowDetail({ row, t }: { row: NonNullable<SpendProviderGroup["row"]>; t: (key: LocaleKey) => string }) {
   const tokens = t("UsageSpendTokens");
-  const known = t("UsageSpendKnownSubtotal");
+  const known = t(row.providerId === "codex" ? "UsageSpendEstimatedSubtotal" : "UsageSpendKnownSubtotal");
   const currency = row.currency || "USD";
   const sevenDay = formatSpendMetric(row.sevenDay, row.sevenDayTokens, currency, tokens, row.sevenDayEstimate?.knownSubtotalUsd, known, row.sevenDayTokensLowerBound);
   const thirtyDay = formatSpendMetric(row.thirtyDay, row.thirtyDayTokens, currency, tokens, row.thirtyDayEstimate?.knownSubtotalUsd, known, row.thirtyDayTokensLowerBound);
@@ -125,16 +125,16 @@ function RowDetail({ row, t }: { row: NonNullable<SpendProviderGroup["row"]>; t:
       {t("UsageSpendCol7d")}: {sevenDay} · {t("UsageSpendCol30d")}: {thirtyDay} · {row.source}
       {row.refreshing && (
         <span title={row.staleUpdatedAt ? `Stale as of ${row.staleUpdatedAt}` : undefined}>
-          {" · "}{t("UsageSpendRefreshing")}
+          {" · "}{t(row.historyPaused ? "UsageSpendPaused" : "UsageSpendPending")}
         </span>
       )}
     </span>
   );
 }
 
-function groupMetric(group: SpendProviderGroup, tokenLabel: string): string {
+function groupMetric(group: SpendProviderGroup, t: (key: LocaleKey) => string): string {
   const parts: string[] = [];
-  if (group.costUsd != null) parts.push(`${group.costIsPartial ? "~" : ""}${formatUsd(group.costUsd, group.currency ?? "USD")}`);
-  if (group.totalTokens != null) parts.push(`${group.totalTokens.toLocaleString()} ${tokenLabel}`);
+  if (group.costUsd != null) parts.push(`${formatUsd(group.costUsd, group.currency ?? "USD")}${group.costIsPartial ? ` (${t("UsageSpendPartialCost")})` : ""}`);
+  if (group.totalTokens != null) parts.push(`${group.totalTokens.toLocaleString()} ${t("UsageSpendTokens")}`);
   return parts.length > 0 ? parts.join(" · ") : "—";
 }

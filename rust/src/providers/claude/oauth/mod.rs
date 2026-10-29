@@ -37,6 +37,7 @@ pub struct ClaudeOAuthCredentials {
     pub expires_at: Option<DateTime<Utc>>,
     pub scopes: Vec<String>,
     pub rate_limit_tier: Option<String>,
+    pub subscription_type: Option<String>,
 }
 
 impl ClaudeOAuthCredentials {
@@ -421,6 +422,7 @@ impl ClaudeOAuthFetcher {
             expires_at: None,
             scopes: vec!["user:profile".to_string()],
             rate_limit_tier: None,
+            subscription_type: None,
         };
 
         self.fetch_with_credentials(credentials).await
@@ -747,6 +749,7 @@ impl ClaudeOAuthFetcher {
             "expiresAt": credentials.expires_at.map(|expires_at| expires_at.timestamp_millis()),
             "scopes": credentials.scopes,
             "rateLimitTier": credentials.rate_limit_tier,
+            "subscriptionType": credentials.subscription_type,
         })
     }
 
@@ -824,6 +827,12 @@ impl ClaudeOAuthFetcher {
             .rate_limit_tier
             .as_deref()
             .and_then(super::claude_plan_label)
+            .or_else(|| {
+                credentials
+                    .subscription_type
+                    .as_deref()
+                    .and_then(super::claude_plan_label)
+            })
         {
             usage = usage.with_login_method(label);
         } else {

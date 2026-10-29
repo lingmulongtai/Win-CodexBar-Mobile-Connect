@@ -26,7 +26,21 @@ fn test_credentials(access_token: &str) -> ClaudeOAuthCredentials {
         expires_at: None,
         scopes: vec!["user:profile".to_string()],
         rate_limit_tier: None,
+        subscription_type: None,
     }
+}
+
+#[test]
+fn subscription_plan_is_used_only_when_tier_does_not_name_a_plan() {
+    let mut credentials = test_credentials("fixture");
+    credentials.rate_limit_tier = Some("default_claude_ai".into());
+    credentials.subscription_type = Some("pro".into());
+    let response: OAuthUsageResponse = serde_json::from_str("{}").unwrap();
+    let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
+    assert_eq!(usage.login_method.as_deref(), Some("Claude Pro"));
+    credentials.rate_limit_tier = Some("default_claude_max_5x".into());
+    let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
+    assert_eq!(usage.login_method.as_deref(), Some("Claude Max 5x"));
 }
 
 #[test]
@@ -170,6 +184,7 @@ fn parses_current_snake_case_oauth_usage_response() {
         expires_at: None,
         scopes: vec!["user:profile".to_string()],
         rate_limit_tier: Some("default_claude_ai".to_string()),
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -294,6 +309,7 @@ fn weekly_all_limit_wins_over_stale_seven_day_utilization() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: Some("default_claude_max_5x".to_string()),
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -354,6 +370,7 @@ fn issue_210_reporter_shape_secondary_is_one_percent_not_one_hundred() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: Some("default_claude_max_5x".to_string()),
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -408,6 +425,7 @@ fn issue_279_session_limits_win_over_stale_five_hour_after_rollover() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: Some("default_claude_max_5x".to_string()),
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -443,6 +461,7 @@ fn session_falls_back_to_legacy_five_hour_without_limits_entry() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: None,
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -515,6 +534,7 @@ fn oauth_extras_put_scoped_weekly_before_routines() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: None,
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
@@ -548,6 +568,7 @@ fn oauth_extras_keep_routines_in_raw_snapshot() {
         expires_at: None,
         scopes: vec![],
         rate_limit_tier: None,
+        subscription_type: None,
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 

@@ -298,7 +298,7 @@ fn test_codex_fast_cost_is_double_standard() {
 fn test_codex_fast_cost_none_above_long_context_threshold() {
     // Input above 272_000 → None (Fast not offered)
     assert_eq!(
-        CostUsagePricing::codex_fast_cost_usd("gpt-5.6-sol", 272_001, 0, 100),
+        CostUsagePricing::codex_fast_cost_usd("gpt-5.4", 272_001, 0, 100),
         None
     );
 }
@@ -714,12 +714,8 @@ fn sol_keeps_historical_rates_before_its_august_repricing() {
                     ((input - 10) as f64 * input_rate + input_rate + 5.0 * output_rate)
                         / 1_000_000.0;
                 let fast = CostUsagePricing::codex_fast_cost_usd_at_date(model, input, 10, 5, day);
-                if long {
-                    assert!(fast.is_none(), "{model} {input} {day}");
-                } else {
-                    let fast = fast.unwrap();
-                    assert!((fast - expected_without_writes * 2.0).abs() < 1e-12);
-                }
+                let fast = fast.unwrap();
+                assert!((fast - expected_without_writes * 2.0).abs() < 1e-12);
             }
         }
     }
@@ -802,4 +798,73 @@ fn gpt54_and_gpt55_bill_the_whole_request_at_long_context_rates_above_272k() {
     // Fast mode keeps its 272K cutoff for these models.
     assert!(CostUsagePricing::codex_fast_cost_usd("gpt-5.5-priority", 272_001, 0, 1).is_none());
     assert!(CostUsagePricing::codex_fast_cost_usd("gpt-5.4-fast", 272_000, 0, 1).is_some());
+}
+
+#[test]
+fn codex_bulk_snapshot_prices_dynamic_tiers_and_preserves_bundled_rules() {
+    let snapshot = crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests(
+        r#"{"openai":{"models":{"gpt-test-model":{"id":"gpt-test-model","cost":{"input":2,"output":8,"cache_read":0.5,"context_over_200k":{"input":4,"output":16,"cache_read":1}}}}}}"#,
+    ).unwrap();
+    let price = |model, input, cached, output, day| {
+        CostUsagePricing::codex_day_aggregate_cost_usd_with_snapshot(
+            model, input, cached, output, day, &snapshot,
+        )
+    };
+    assert!((price("gpt-test-model", 100_000, 50_000, 1_000, None).unwrap() - 0.133).abs() < 1e-9);
+    assert!((price("gpt-test-model", 300_000, 100_000, 1_000, None).unwrap() - 0.916).abs() < 1e-9);
+    assert_eq!(price("definitely-unknown-model", 100, 0, 10, None), None);
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 12);
+    for model in ["gpt-6-astra", "gpt-6-astra-priority", "gpt-5.6-sol"] {
+        for input in [100_000, 300_000] {
+            assert_eq!(
+                price(model, input, 20_000, 1000, day),
+                CostUsagePricing::codex_day_aggregate_cost_usd(model, input, 20_000, 1000, day)
+            );
+        }
+    }
+}
+
+#[test]
+fn gpt6_bundled_standard_and_fast_prices_use_official_272k_threshold() {
+    for (model, input, cached, output) in [
+        ("gpt-6-sol", 2.0, 0.2, 10.0),
+        ("gpt-6.1-sol", 2.0, 0.1, 10.0),
+        ("gpt-6.1-terra", 1.0, 0.05, 5.0),
+    ] {
+        for amount in [200_001_u64, 272_000, 272_001] {
+            let long = amount > 272_000;
+            let expected = (((amount - 100) as f64 * input + 100.0 * cached)
+                * if long { 2.0 } else { 1.0 }
+                + 20.0 * output * if long { 1.5 } else { 1.0 })
+                / 1_000_000.0;
+            let actual = CostUsagePricing::codex_cost_usd(model, amount, 100, 20).unwrap();
+            assert!((actual - expected).abs() < 1e-10, "{model} {amount}");
+            let fast = CostUsagePricing::codex_fast_cost_usd(model, amount, 100, 20).unwrap();
+            assert!((fast - expected * 2.0).abs() < 1e-10, "{model} {amount}");
+        }
+    }
+}
+
+#[test]
+fn gpt56_long_context_fast_starts_on_august_fifth() {
+    let before = chrono::NaiveDate::from_ymd_opt(2026, 8, 4).unwrap();
+    let after = chrono::NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+    for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        assert!(
+            CostUsagePricing::codex_fast_cost_usd_at_date(model, 272_001, 0, 0, before).is_none()
+        );
+        assert!(
+            CostUsagePricing::codex_fast_cost_usd_at_date(model, 272_001, 0, 0, after).is_some()
+        );
+        assert!(!CostUsagePricing::codex_fast_lane_covers_at_date(
+            model,
+            272_001,
+            Some(before)
+        ));
+        assert!(CostUsagePricing::codex_fast_lane_covers_at_date(
+            model,
+            272_001,
+            Some(after)
+        ));
+    }
 }

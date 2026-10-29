@@ -125,6 +125,9 @@ pub struct SpendModelRow {
     pub model: String,
     /// None = unknown/unpriced. Some(0.0) = known free.
     pub cost_usd: Option<f64>,
+    /// Known priced portion when the full model cost cannot be established.
+    #[serde(default)]
+    pub partial_cost_usd: Option<f64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -171,6 +174,7 @@ pub struct ImportedSpendSource {
     pub hourly_activity: Vec<SpendActivityCell>,
 }
 
+#[derive(Default)]
 struct NativeSpendData {
     projects: Vec<ProjectUsage>,
     conversations: Vec<SessionUsage>,
@@ -469,6 +473,27 @@ pub fn build_local_spend_contract_from_summary(
     )
 }
 
+/// Build only the totals used by a summary card. Project, conversation and
+/// daily detail are loaded separately for the selected reporting period.
+pub fn build_local_spend_totals_from_summary(
+    provider_id: &str,
+    history_days: u32,
+    include_opencodex: bool,
+    hide_native_codex_when_opencodex_present: bool,
+    hide_personal_info: bool,
+    summary: CostSummary,
+) -> SpendContract {
+    build_contract_from_period_summary_inner(
+        provider_id,
+        CostReportingPeriod::Rolling(history_days.clamp(1, MAX_ROLLING_DAYS)),
+        include_opencodex,
+        hide_native_codex_when_opencodex_present,
+        hide_personal_info,
+        summary,
+        false,
+    )
+}
+
 /// Build the accounting contract for `period` from a summary scanned for that
 /// same period.
 ///
@@ -484,12 +509,34 @@ pub fn build_contract_from_period_summary(
     hide_personal_info: bool,
     summary: CostSummary,
 ) -> SpendContract {
+    build_contract_from_period_summary_inner(
+        provider_id,
+        period,
+        include_opencodex,
+        hide_native_codex_when_opencodex_present,
+        hide_personal_info,
+        summary,
+        true,
+    )
+}
+
+fn build_contract_from_period_summary_inner(
+    provider_id: &str,
+    period: CostReportingPeriod,
+    include_opencodex: bool,
+    hide_native_codex_when_opencodex_present: bool,
+    hide_personal_info: bool,
+    summary: CostSummary,
+    include_details: bool,
+) -> SpendContract {
     let history_days = period.sidecar_days(Utc::now());
     let custom = CustomPricing::load();
     let native_models = model_rows(provider_id, &summary, &custom);
     let native_coverage = coverage_for_models(&native_models);
     let native_cost = known_subtotal(&native_models, &summary);
-    let native_has_window_costs = native_models.iter().any(|model| model.cost_usd.is_some());
+    let native_has_window_costs = native_models
+        .iter()
+        .any(|model| model.cost_usd.is_some() || model.partial_cost_usd.is_some());
     let native_provenance = CostProvenance::for_window(
         CostProvenance::ListPriceEstimate,
         native_has_window_costs,
@@ -504,7 +551,11 @@ pub fn build_contract_from_period_summary(
         ..SpendTokenMix::default()
     };
 
-    let native = load_native_spend(provider_id, history_days, hide_personal_info);
+    let native = if include_details {
+        load_native_spend(provider_id, history_days, hide_personal_info)
+    } else {
+        NativeSpendData::default()
+    };
     let imports: Vec<_> = if include_opencodex {
         opencodex::load_for_subscription(provider_id, history_days, &custom)
             .into_iter()
@@ -605,15 +656,9 @@ fn load_native_spend(
                 snapshot.redact_for_privacy();
             }
             let activity = activity_from_sessions(&snapshot.sessions);
-            let daily = snapshot
-                .daily
-                .iter()
-                .map(|point| SpendDailyPoint {
-                    day: point.day.clone(),
-                    cost_usd: point.estimated_cost_usd,
-                    total_tokens: Some(point.total_tokens),
-                })
-                .collect();
+            // The scanner checks source completeness and pricing evidence; the
+            // workspace index cannot establish fork and priority coverage.
+            let daily = daily_points(provider_id, history_days);
             NativeSpendData {
                 projects: snapshot.projects,
                 conversations: snapshot.sessions,
@@ -771,7 +816,13 @@ fn model_rows(
             // remain unknown rather than falling back to built-in/model.dev rates.
             let cost_usd = if let Some(rates) = custom_rates {
                 rates.cost(&counts)
-            } else if summary.unknown_models.contains(&model) {
+            } else if summary.unknown_models.contains(&model)
+                || matches!(
+                    &summary.model_pricing_completeness,
+                    crate::cost_scanner::ModelPricingCompleteness::Partial { unpriced_models }
+                        if unpriced_models.contains(&model)
+                )
+            {
                 None
             } else {
                 summary
@@ -780,9 +831,22 @@ fn model_rows(
                     .copied()
                     .filter(|value| value.is_finite() && *value >= 0.0)
             };
+            let partial_cost_usd = if cost_usd.is_none()
+                && custom_rates.is_none()
+                && !summary.unknown_models.contains(&model)
+            {
+                summary
+                    .by_model
+                    .get(&model)
+                    .copied()
+                    .filter(|value| value.is_finite() && *value > 0.0)
+            } else {
+                None
+            };
             SpendModelRow {
                 model,
                 cost_usd,
+                partial_cost_usd,
                 input_tokens: counts.input_tokens,
                 output_tokens: counts.output_tokens,
                 cache_read_tokens: counts.cached_tokens,
@@ -976,7 +1040,15 @@ fn add_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
 fn merge_models(mut left: Vec<SpendModelRow>, right: &[SpendModelRow]) -> Vec<SpendModelRow> {
     for incoming in right {
         if let Some(existing) = left.iter_mut().find(|row| row.model == incoming.model) {
-            existing.cost_usd = sum_optional_cost(existing.cost_usd, incoming.cost_usd);
+            if existing.cost_usd.is_some() && incoming.cost_usd.is_some() {
+                existing.cost_usd = sum_optional_cost(existing.cost_usd, incoming.cost_usd);
+            } else {
+                existing.partial_cost_usd = sum_optional_cost(
+                    existing.cost_usd.or(existing.partial_cost_usd),
+                    incoming.cost_usd.or(incoming.partial_cost_usd),
+                );
+                existing.cost_usd = None;
+            }
             existing.input_tokens = existing.input_tokens.saturating_add(incoming.input_tokens);
             existing.output_tokens = existing
                 .output_tokens

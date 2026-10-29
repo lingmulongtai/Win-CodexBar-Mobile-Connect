@@ -158,11 +158,7 @@ async fn parse_release_response(
 }
 
 fn remote_version_from_tag(tag_name: &str) -> &str {
-    tag_name
-        .trim_start_matches('v')
-        .split('-')
-        .next()
-        .unwrap_or(tag_name)
+    tag_name.trim_start_matches('v')
 }
 
 fn select_release_target(release: &GitHubRelease) -> Option<UpdateInfo> {
@@ -207,8 +203,10 @@ fn is_installer_asset_name(name: &str) -> bool {
     lower.ends_with("-setup.exe") || lower.ends_with(".msi")
 }
 
+#[cfg(test)]
 fn parse_version_triplet(v: &str) -> (u32, u32, u32) {
-    let parts: Vec<u32> = v.split('.').filter_map(|p| p.parse().ok()).collect();
+    let core = v.split(['-', '+']).next().unwrap_or(v);
+    let parts: Vec<u32> = core.split('.').filter_map(|p| p.parse().ok()).collect();
     (
         parts.first().copied().unwrap_or(0),
         parts.get(1).copied().unwrap_or(0),
@@ -216,6 +214,7 @@ fn parse_version_triplet(v: &str) -> (u32, u32, u32) {
     )
 }
 
+#[cfg(test)]
 fn installer_version_from_name(name: &str) -> Option<(u32, u32, u32)> {
     let lower = name.to_ascii_lowercase();
     let stem = lower
@@ -241,6 +240,88 @@ fn installer_version_from_name(name: &str) -> Option<(u32, u32, u32)> {
     Some(version)
 }
 
+fn installer_semver_from_name(name: &str) -> Option<String> {
+    let lower = name.to_ascii_lowercase();
+    let stem = lower
+        .strip_suffix("-setup.exe")
+        .or_else(|| lower.strip_suffix(".msi"))?;
+    let candidate = stem.trim_start_matches(|ch: char| !ch.is_ascii_digit());
+    // MSI names may append architecture and locale after an underscore.
+    let candidate = candidate.split('_').next()?;
+    compare_versions(candidate, candidate)?;
+    Some(candidate.to_owned())
+}
+
+/// SemVer precedence: compare numeric core, then prerelease identifiers;
+/// build metadata has no effect. Reject malformed input rather than guessing.
+fn compare_versions(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    fn parse(value: &str) -> Option<([u64; 3], Vec<&str>)> {
+        let (main, build) = value
+            .split_once('+')
+            .map_or((value, None), |(a, b)| (a, Some(b)));
+        let valid_ident = |ident: &str| {
+            !ident.is_empty()
+                && ident
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        };
+        if build.is_some_and(|b| !b.split('.').all(valid_ident)) {
+            return None;
+        }
+        let (core, pre) = main
+            .split_once('-')
+            .map_or((main, None), |(a, b)| (a, Some(b)));
+        let parts: Vec<&str> = core.split('.').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        let number = |v: &str| -> Option<u64> {
+            if v.is_empty()
+                || (v.len() > 1 && v.starts_with('0'))
+                || !v.bytes().all(|b| b.is_ascii_digit())
+            {
+                return None;
+            }
+            v.parse().ok()
+        };
+        let core = [number(parts[0])?, number(parts[1])?, number(parts[2])?];
+        let pre: Vec<&str> = pre.map_or_else(Vec::new, |v| v.split('.').collect());
+        if !pre.iter().all(|v| {
+            valid_ident(v)
+                && !(v.len() > 1 && v.starts_with('0') && v.bytes().all(|b| b.is_ascii_digit()))
+        }) {
+            return None;
+        }
+        Some((core, pre))
+    }
+    let (left_core, left_pre) = parse(left)?;
+    let (right_core, right_pre) = parse(right)?;
+    let core = left_core.cmp(&right_core);
+    if !core.is_eq() {
+        return Some(core);
+    }
+    match (left_pre.is_empty(), right_pre.is_empty()) {
+        (true, true) => return Some(std::cmp::Ordering::Equal),
+        (true, false) => return Some(std::cmp::Ordering::Greater),
+        (false, true) => return Some(std::cmp::Ordering::Less),
+        _ => {}
+    }
+    for (left, right) in left_pre.iter().zip(&right_pre) {
+        let ln = left.bytes().all(|b| b.is_ascii_digit());
+        let rn = right.bytes().all(|b| b.is_ascii_digit());
+        let order = match (ln, rn) {
+            (true, true) => left.len().cmp(&right.len()).then_with(|| left.cmp(right)),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (false, false) => left.cmp(right),
+        };
+        if !order.is_eq() {
+            return Some(order);
+        }
+    }
+    Some(left_pre.len().cmp(&right_pre.len()))
+}
+
 fn parse_sha256_digest(digest: &str) -> Option<&str> {
     let (algo, hex) = digest.split_once(':')?;
     if !algo.eq_ignore_ascii_case("sha256") {
@@ -257,10 +338,7 @@ fn parse_sha256_digest(digest: &str) -> Option<&str> {
 
 /// Compare semantic versions, returns true if remote is newer
 fn is_newer_version(remote: &str, current: &str) -> bool {
-    let remote_v = parse_version_triplet(remote);
-    let current_v = parse_version_triplet(current);
-
-    remote_v > current_v
+    compare_versions(remote, current).is_some_and(|order| order.is_gt())
 }
 
 /// Get the current version
@@ -681,7 +759,7 @@ pub fn get_pending_update() -> Option<PathBuf> {
 }
 
 fn find_pending_installer_in_dir(download_dir: &Path) -> Option<PathBuf> {
-    let current_version = parse_version_triplet(CURRENT_VERSION);
+    let current_version = CURRENT_VERSION;
 
     // Only treat newer installer assets as pending updates, and prefer the highest
     // installer version when multiple cached installers are present.
@@ -691,8 +769,8 @@ fn find_pending_installer_in_dir(download_dir: &Path) -> Option<PathBuf> {
         .filter_map(|entry| {
             let path = entry.path();
             let file_name = path.file_name()?.to_str()?;
-            let installer_version = installer_version_from_name(file_name)?;
-            if installer_version <= current_version {
+            let installer_version = installer_semver_from_name(file_name)?;
+            if !is_newer_version(&installer_version, current_version) {
                 return None;
             }
 
@@ -706,7 +784,11 @@ fn find_pending_installer_in_dir(download_dir: &Path) -> Option<PathBuf> {
 
             Some(((installer_version, modified), path))
         })
-        .max_by_key(|(sort_key, _)| *sort_key)
+        .max_by(|(left, _), (right, _)| {
+            compare_versions(&left.0, &right.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.1.cmp(&right.1))
+        })
         .map(|(_, path)| path)
 }
 
@@ -755,6 +837,34 @@ mod tests {
         };
         assert!(!info.supports_auto_download());
         assert!(!info.supports_auto_apply());
+    }
+
+    #[test]
+    fn development_version_updates_to_the_matching_stable_release() {
+        assert!(is_newer_version("0.72.1", "0.72.1-dev.1"));
+        assert!(is_newer_version("0.72.1-dev.2", "0.72.1-dev.1"));
+        assert!(!is_newer_version("0.72.1-dev.1", "0.72.1"));
+        assert!(!is_newer_version("invalid", "0.72.1"));
+        assert!(!is_newer_version("0.72.1+build.2", "0.72.1+build.1"));
+        assert_eq!(remote_version_from_tag("v0.72.1-beta.1"), "0.72.1-beta.1");
+        assert_eq!(
+            installer_semver_from_name("CodexBar-0.72.1-Setup.exe").as_deref(),
+            Some("0.72.1")
+        );
+        assert!(is_newer_version(
+            "0.72.1",
+            &installer_semver_from_name("CodexBar-0.72.1-dev.1-Setup.exe").unwrap()
+        ));
+        assert_eq!(
+            installer_semver_from_name("CodexBar_0.73.0_x64_en-US.msi").as_deref(),
+            Some("0.73.0")
+        );
+        assert_eq!(
+            installer_semver_from_name("CodexBar-0.73.0-beta.1_x64_en-US.msi").as_deref(),
+            Some("0.73.0-beta.1")
+        );
+        assert!(is_newer_version("1.0.0-rc.10", "1.0.0-rc.2"));
+        assert!(!is_newer_version("1.0.0-rc.01", "1.0.0-rc.1"));
     }
 
     #[test]
@@ -868,7 +978,7 @@ mod tests {
         let (major, minor, patch) = parse_version_triplet(CURRENT_VERSION);
         let current = temp
             .path()
-            .join(format!("CodexBar-{}.{}.{}-Setup.exe", major, minor, patch));
+            .join(format!("CodexBar-{CURRENT_VERSION}-Setup.exe"));
         let older = temp.path().join(format!(
             "CodexBar-{}.{}.{}-Setup.exe",
             major,

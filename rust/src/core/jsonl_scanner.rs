@@ -241,6 +241,14 @@ pub struct CostUsageCache {
     /// Dirty/incomplete Codex rollouts deferred by the foreground work budget.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub codex_pending_paths: Vec<String>,
+    /// Per-file date ranges parsed during the current source-bound catch-up.
+    /// Global coverage must not be advanced until every candidate completes.
+    #[serde(
+        default,
+        skip_serializing_if = "HashMap::is_empty",
+        serialize_with = "save_skip::sorted_map"
+    )]
+    pub codex_pending_file_ranges: HashMap<String, (String, String)>,
     /// True while bounded Codex catch-up has not completed for this window.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub codex_scan_incomplete: bool,
@@ -265,6 +273,8 @@ pub struct CostUsageCache {
     /// refresh clears it before starting the next pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_scan_pause_reason: Option<CodexScanPauseReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_pause_observation: Option<String>,
     /// Cached request rows retained as source evidence for Codex recovery.
     ///
     /// This is separate from `files` because the Windows cache currently
@@ -277,10 +287,11 @@ pub struct CostUsageCache {
         serialize_with = "save_skip::sorted_map"
     )]
     pub codex_source_rows: HashMap<String, CodexSourceRowCache>,
-    /// Request rows of fork-shaped Codex files (a `forked_from_id` or a
-    /// parent-baseline lineage), built from the same parsed records as the
-    /// file's day totals. Source-row evidence skips these files, so this map
-    /// is what lets Priority trace evidence reach forked sessions.
+    /// Approved backup snapshots, loaded separately; never masquerade as live files.
+    #[serde(skip)]
+    pub codex_saved_rows: HashMap<String, Vec<CodexSourceUsageRow>>,
+    /// Incrementally retained event rows from the same parser pass as file totals.
+    /// The serialized name is retained for compatibility with fork-only caches.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub codex_fork_rows: HashMap<String, Vec<CodexSourceUsageRow>>,
     /// Priority (Fast) turn evidence read from the Codex trace database.
@@ -624,8 +635,8 @@ pub use codex::priority::{
 };
 mod save_skip;
 pub(crate) use codex::source_rows::{
-    read_source_rows, recover_rows, row_cache, row_cache_matches, row_cache_needs_recovery,
-    row_priced_model, rows_from_records,
+    read_source_rows, recover_rows, row_cache_matches, row_cache_needs_recovery, row_priced_model,
+    rows_from_records,
 };
 
 impl JsonlScanner {
@@ -1007,10 +1018,45 @@ impl JsonlScanner {
         dirs::cache_dir().map(|d| d.join("CodexBar"))
     }
 
+    /// New parser generations and configured history sources never overwrite
+    /// previous caches. Lexical configuration is stable when a drive is offline.
+    pub fn default_codex_cache_root() -> Option<PathBuf> {
+        use sha2::{Digest, Sha256};
+        let settings = crate::settings::Settings::load();
+        let mut roots = crate::codex_sessions::codex_sessions_dir_candidates(
+            dirs::home_dir(),
+            std::env::var("CODEX_HOME").ok(),
+            &settings.codex_custom_sessions_dirs,
+            &[],
+        )
+        .into_iter()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+        if cfg!(windows) {
+            roots.iter_mut().for_each(|p| *p = p.to_lowercase());
+        }
+        roots.sort();
+        roots.dedup();
+        let key = serde_json::to_vec(&(
+            "request-pricing-v1",
+            roots,
+            crate::cost_reporting_period::cost_bucket_zone().identifier(),
+        ))
+        .ok()?;
+        let hash = format!("{:x}", Sha256::digest(key));
+        Some(Self::default_cache_root()?.join("codex-scopes").join(hash))
+    }
+
     fn cache_path(provider: ProviderId, cache_root: Option<&Path>) -> PathBuf {
         let root = cache_root
             .map(|p| p.to_path_buf())
-            .or_else(Self::default_cache_root)
+            .or_else(|| {
+                if provider == ProviderId::Codex {
+                    Self::default_codex_cache_root()
+                } else {
+                    Self::default_cache_root()
+                }
+            })
             .unwrap_or_else(|| PathBuf::from("."));
 
         // Mirror upstream layout: {cacheRoot}/cost-usage/{provider}-v1.json

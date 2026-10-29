@@ -9,8 +9,14 @@ mod logical_target;
 mod pending_range;
 mod priority_trace;
 mod reconciliation;
+mod saved_history;
 mod scan;
-use cache_days::rebuild_cache_days;
+pub(crate) use cache_days::{
+    daily_prices_from_source_rows as codex_daily_request_prices,
+    price_summary_from_source_rows as reprice_codex_from_source_rows,
+    request_price_supported_with_snapshot as codex_request_price_supported_with_snapshot,
+};
+use cache_days::{price_summary_from_source_rows, rebuild_cache_days};
 use flat_sources::{
     CodexFlatListing, earliest_flat_codex_day, is_flat_codex_path_in_scan_window,
     relocate_moved_codex_rollouts,
@@ -18,7 +24,8 @@ use flat_sources::{
 use fork_resume::CodexForkResume;
 use logical_target::*;
 use pending_range::{
-    CodexPendingScanContext, CodexPendingScanDisposition, codex_cache_has_validated_state,
+    CodexPendingScanContext, CodexPendingScanDisposition, codex_cache_covers_file,
+    codex_cache_has_validated_state,
 };
 use reconciliation::*;
 
@@ -188,6 +195,77 @@ struct CodexPreparedCandidate {
 struct CodexFileScanOutcome {
     bytes_read: i64,
     is_complete: bool,
+    reused_validated_prefix: bool,
+}
+
+// Serialize scans sharing a cache inside this process. Each scan reads and
+// replaces a snapshot; concurrent scans would otherwise discard each other's
+// bounded catch-up progress. Separate cache roots remain independent.
+fn codex_scan_lock(cache_root: Option<&Path>) -> std::sync::Arc<std::sync::Mutex<()>> {
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    let root = cache_root
+        .map(Path::to_path_buf)
+        .or_else(JsonlScanner::default_codex_cache_root)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Resolve the same key before and after the cache is first persisted.
+    // If creating or resolving the directory fails, serialize these uncommon
+    // scans on one fallback lock instead of inventing unstable path keys.
+    let root = if fs::create_dir_all(&root).is_ok() {
+        fs::canonicalize(&root).unwrap_or_default()
+    } else {
+        PathBuf::new()
+    };
+    #[cfg(windows)]
+    let root = PathBuf::from(root.to_string_lossy().to_lowercase());
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&root).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(root, Arc::downgrade(&lock));
+    lock
+}
+
+#[cfg(test)]
+mod scan_lock_tests {
+    use super::codex_scan_lock;
+    use std::sync::Arc;
+
+    #[test]
+    fn scans_of_the_same_cache_share_a_lock_but_other_roots_do_not() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let new_root = first.path().join("new-cache");
+        let lock = codex_scan_lock(Some(&new_root));
+        assert!(new_root.is_dir());
+        let same = codex_scan_lock(Some(&new_root.join(".")));
+        let other = codex_scan_lock(Some(second.path()));
+        assert!(Arc::ptr_eq(&lock, &same));
+        assert!(!Arc::ptr_eq(&lock, &other));
+        let _guard = lock.lock().unwrap();
+        assert!(same.try_lock().is_err());
+        assert!(other.try_lock().is_ok());
+    }
+
+    #[test]
+    fn cancelled_scan_does_not_wait_for_a_busy_cache() {
+        use super::CostScanner;
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let lock = codex_scan_lock(Some(root.path()));
+        let _guard = lock.lock().unwrap();
+        let cancelled = AtomicBool::new(true);
+        let (summary, stats) = CostScanner::new(30)
+            .with_cache_root(root.path())
+            .scan_codex_detailed(Some(&cancelled));
+        assert!(!summary.history_coverage_established);
+        assert_eq!(stats.files_parsed, 0);
+    }
 }
 
 /// Cost usage scanner
@@ -217,7 +295,47 @@ impl CostScanner {
         &self,
         cancel: Option<&AtomicBool>,
     ) -> (CostSummary, CostScanStats, CostUsageCache) {
-        scan::scan_codex_detailed_with_cache(self, cancel)
+        let root = self
+            .cache_root
+            .clone()
+            .or_else(JsonlScanner::default_codex_cache_root);
+        let dirs = self.get_codex_sessions_dirs();
+        let scope_changed =
+            || self.cache_root.is_none() && root != JsonlScanner::default_codex_cache_root();
+        if scope_changed() {
+            return (
+                CostSummary::default(),
+                CostScanStats::default(),
+                CostUsageCache::default(),
+            );
+        }
+        let lock = codex_scan_lock(root.as_deref());
+        let _guard = loop {
+            match lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if is_cancelled(cancel) {
+                        return (
+                            CostSummary::default(),
+                            CostScanStats::default(),
+                            CostUsageCache::default(),
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+            }
+        };
+        let result = scan::scan_codex_detailed_with_cache(self, cancel, root.as_deref(), &dirs);
+        if scope_changed() {
+            (
+                CostSummary::default(),
+                CostScanStats::default(),
+                CostUsageCache::default(),
+            )
+        } else {
+            result
+        }
     }
 
     /// Scan Claude local logs
@@ -445,20 +563,10 @@ impl CostScanner {
         let path_key = path.to_string_lossy().to_string();
         let file_identity = JsonlScanner::codex_file_identity(path, &metadata);
         let cached = cache.files.get(&path_key).cloned();
-        let cache_covers_range = JsonlScanner::cache_covers_range(cache, range);
-        let trace_was_pruned = cached.as_ref().is_some_and(|entry| {
-            entry.size > size
-                && (entry.parsed_bytes.unwrap_or(0) > size || codex_scan_target_size(entry) > size)
-        });
-        if trace_was_pruned && !self.options.is_app_driven() {
-            // A shrinking trace invalidates the append cursor. Preserve the
-            // validated cache and queue the path for an explicit cold refresh
-            // instead of silently replacing history during synchronization.
-            return CodexFileScanOutcome {
-                bytes_read: 0,
-                is_complete: false,
-            };
-        }
+        let cache_covers_range = codex_cache_covers_file(cache, &path_key, range);
+        // A shorter file cannot reuse the append cursor; the normal bounded
+        // cold path below reparses it while the outer scan retains the previous
+        // report until the replacement is complete.
         let cache_entry_is_fresh = |entry: &CostUsageFileUsage| {
             cached_codex_file_is_fresh(cache, planner, entry, cache_covers_range, mtime_ms, size)
         };
@@ -488,6 +596,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: true,
+                reused_validated_prefix: true,
             };
         }
 
@@ -631,6 +740,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: false,
+                reused_validated_prefix: false,
             };
         }
 
@@ -650,6 +760,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: true,
+                reused_validated_prefix: true,
             };
         }
 
@@ -660,6 +771,7 @@ impl CostScanner {
         if !is_fork
             && !cached_identity_changed
             && let Some(entry) = &cached
+            && identity_matches_cached(entry)
         {
             let start_offset = entry.parsed_bytes.unwrap_or(0);
             let same_partial =
@@ -697,14 +809,13 @@ impl CostScanner {
                 mark_included_records(&mut parse_result.records, has_creator_account);
                 let mut days = entry.days.clone();
                 merge_codex_records_into_days(&mut days, &parse_result.records);
-                if codex_forked_from_id.is_some() {
-                    // Only extend rows that already cover the parsed prefix;
-                    // a partial row set could never match the day totals.
-                    if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
-                        rows.extend(codex_fork_rows_from_records(&parse_result.records));
-                    }
-                } else {
-                    cache.codex_fork_rows.remove(&path_key);
+                // Retain the same event rows as the incrementally updated days.
+                if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
+                    rows.extend(codex_fork_rows_from_records(&parse_result.records));
+                } else if let Some(source) = cache.codex_source_rows.get(&path_key) {
+                    let mut rows = source.rows.clone();
+                    rows.extend(codex_fork_rows_from_records(&parse_result.records));
+                    cache.codex_fork_rows.insert(path_key.clone(), rows);
                 }
                 let (session_cost, has_tokens) =
                     add_codex_days_map_to_summary(summary, &days, range);
@@ -715,6 +826,7 @@ impl CostScanner {
                 let outcome = CodexFileScanOutcome {
                     bytes_read: parse_result.bytes_read,
                     is_complete: parse_result.is_complete,
+                    reused_validated_prefix: true,
                 };
                 cache.files.insert(
                     path_key,
@@ -864,6 +976,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: parse_result.bytes_read,
                 is_complete: false,
+                reused_validated_prefix: false,
             };
         }
         // A resumed parse returns only the suffix; its prefix is the cached day
@@ -873,16 +986,13 @@ impl CostScanner {
             _ => HashMap::new(),
         };
         merge_codex_records_into_days(&mut days, &parse_result.records);
-        if is_fork || codex_forked_from_id.is_some() {
-            // Priority evidence for fork-shaped files is tracked separately
-            // (source-row evidence skips them), so rebuild the row set from
-            // the same parsed records that fed the day totals.
-            cache.codex_fork_rows.insert(
-                path_key.clone(),
-                codex_fork_rows_from_records(&parse_result.records),
-            );
+        let new_rows = codex_fork_rows_from_records(&parse_result.records);
+        if resumed {
+            if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
+                rows.extend(new_rows);
+            }
         } else {
-            cache.codex_fork_rows.remove(&path_key);
+            cache.codex_fork_rows.insert(path_key.clone(), new_rows);
         }
         let (session_cost, has_tokens) = if resumed {
             add_codex_days_map_to_summary(summary, &days, range)
@@ -896,6 +1006,7 @@ impl CostScanner {
         let outcome = CodexFileScanOutcome {
             bytes_read: parse_result.bytes_read,
             is_complete: parse_result.is_complete,
+            reused_validated_prefix: resumed,
         };
         let locally_resolved = parse_result.fork_baseline_locally_resolved;
         let codex_fork_accounting_state = if is_fork

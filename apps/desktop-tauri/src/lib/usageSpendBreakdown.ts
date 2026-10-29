@@ -38,6 +38,19 @@ export function compareSpendProviderGroups(a: SpendProviderGroup, b: SpendProvid
   );
 }
 
+/** Include verified model portions only in the explicitly marked provider subtotal. */
+export function providerKnownSubtotal(contract: SpendContract): number | null {
+  // Model rows can combine a complete imported source with an incomplete
+  // native source. Sum the merged rows once instead of adding partials to
+  // contract.knownCostUsd, which may already include the imported portion.
+  const values = contract.models.map((model) => model.costUsd ?? model.partialCostUsd)
+    .filter((value): value is number => value != null && Number.isFinite(value) && value >= 0);
+  const modelSubtotal = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  const contractSubtotal = contract.knownCostUsd;
+  if (modelSubtotal == null || !Number.isFinite(modelSubtotal)) return contractSubtotal;
+  return contractSubtotal == null ? modelSubtotal : Math.max(modelSubtotal, contractSubtotal);
+}
+
 /**
  * Group the contract's model rows by the provider that produced them.
  *
@@ -54,9 +67,9 @@ export function buildSpendProviderGroups(
   const group: SpendProviderGroup = {
     providerId: contract.providerId,
     displayName: providerName,
-    costUsd: contract.knownCostUsd,
+    costUsd: providerKnownSubtotal(contract),
     totalTokens: Number.isSafeInteger(totalTokens) ? totalTokens : null,
-    costIsPartial: contract.priceCoverage.unpriced > 0,
+    costIsPartial: contract.priceCoverage.unpriced > 0 || contract.priceCoverage.unmetered > 0,
     hasPartialModelHistory: !contract.historyCoverageEstablished,
     models: contract.models,
   };
@@ -79,9 +92,9 @@ export function buildSpendProviderRowGroups(
       return {
         providerId: row.providerId,
         displayName: row.displayName,
-        costUsd: row.periodCost,
+        costUsd: isContract ? providerKnownSubtotal(contract) : row.periodCost,
         totalTokens: row.periodTokens,
-        costIsPartial: isContract && contract.priceCoverage.unpriced > 0,
+        costIsPartial: isContract && (contract.priceCoverage.unpriced > 0 || contract.priceCoverage.unmetered > 0),
         hasPartialModelHistory: isContract && contract.models.length > 0 && !contract.historyCoverageEstablished,
         models: isContract ? contract.models : [],
         currency: row.currency || "USD",

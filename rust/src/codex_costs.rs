@@ -64,6 +64,7 @@ fn codex_today_summary(history: &CostSummary, cache: &CostUsageCache) -> CostSum
     };
     let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, &range);
     summary.total_cost_usd = cost;
+    crate::cost_scanner::reprice_codex_from_source_rows(&mut summary, cache, &range);
     summary.sessions_count = cache
         .files
         .values()
@@ -139,7 +140,8 @@ pub(crate) fn add_codex_records_to_summary(
                     .map(|reasoning| u64::try_from(reasoning.max(0)).unwrap_or(0)),
             );
         let pricing_day = CostUsageDayRange::parse_day_key(&record.day_key);
-        if let Some(cost) = add_codex_tokens_to_summary(summary, &record.model, tokens, pricing_day)
+        if let Some(cost) =
+            add_codex_tokens_to_summary(summary, &record.model, tokens, pricing_day, None)
         {
             total_cost += cost;
             has_tokens = true;
@@ -171,6 +173,16 @@ pub(crate) fn add_codex_packed_tokens_to_summary(
     packed: &[i64],
     pricing_day: Option<NaiveDate>,
 ) -> Option<f64> {
+    add_codex_packed_tokens_to_summary_with_snapshot(summary, model, packed, pricing_day, None)
+}
+
+pub(crate) fn add_codex_packed_tokens_to_summary_with_snapshot(
+    summary: &mut CostSummary,
+    model: &str,
+    packed: &[i64],
+    pricing_day: Option<NaiveDate>,
+    snapshot: Option<&crate::core::ModelsDevPricingSnapshot>,
+) -> Option<f64> {
     let input = packed.first().copied().unwrap_or(0);
     let cached = packed.get(1).copied().unwrap_or(0);
     let output = packed.get(2).copied().unwrap_or(0);
@@ -183,6 +195,7 @@ pub(crate) fn add_codex_packed_tokens_to_summary(
         model,
         CodexTokenCounts::from_values(input, cached, output).with_reasoning(reasoning),
         pricing_day,
+        snapshot,
     )
 }
 
@@ -320,6 +333,7 @@ fn add_codex_tokens_to_summary(
     model: &str,
     tokens: CodexTokenCounts,
     pricing_day: Option<NaiveDate>,
+    snapshot: Option<&crate::core::ModelsDevPricingSnapshot>,
 ) -> Option<f64> {
     if tokens.is_empty() {
         return None;
@@ -384,13 +398,23 @@ fn add_codex_tokens_to_summary(
         return Some(0.0);
     }
 
-    let priced = CostUsagePricing::codex_day_aggregate_cost_usd(
-        &model_key,
-        tokens.input,
-        tokens.cached,
-        tokens.output,
-        pricing_day,
-    );
+    let priced = match snapshot {
+        Some(snapshot) => CostUsagePricing::codex_day_aggregate_cost_usd_with_snapshot(
+            &model_key,
+            tokens.input,
+            tokens.cached,
+            tokens.output,
+            pricing_day,
+            snapshot,
+        ),
+        None => CostUsagePricing::codex_day_aggregate_cost_usd(
+            &model_key,
+            tokens.input,
+            tokens.cached,
+            tokens.output,
+            pricing_day,
+        ),
+    };
     let uses_fallback_pricing = priced.is_none();
     let cost = priced.unwrap_or_else(|| {
         codex_cost_usd_fallback(&model_key, tokens.input, tokens.cached, tokens.output)
