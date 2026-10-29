@@ -177,7 +177,11 @@ pub fn current_session_with_priority<'a>(
             return false;
         }
         stale_reads += 1;
-        let Some(started) = metadata::codex_open_turn(std::path::Path::new(path), now) else {
+        // Give the four newest candidates a wider search, while bounding
+        // total I/O if many stale sessions are present.
+        let Some(started) =
+            metadata::codex_open_turn(std::path::Path::new(path), now, stale_reads <= 4)
+        else {
             return false;
         };
         // Process-to-transcript correlation is approximate. Require a
