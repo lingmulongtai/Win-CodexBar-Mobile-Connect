@@ -263,8 +263,10 @@ struct ClaudeEvent {
     timestamp: Option<String>,
     #[serde(rename = "requestId", alias = "request_id")]
     request_id: Option<String>,
-    #[serde(rename = "sessionId", alias = "session_id")]
+    #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    #[serde(rename = "session_id")]
+    session_id_snake: Option<String>,
     message: Option<ClaudeMessage>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
@@ -278,11 +280,22 @@ impl ClaudeEvent {
             .map(|ts| ts.with_timezone(&Utc))
     }
 
+    fn conflicting_session_ids(&self) -> bool {
+        matches!((self.session_id.as_deref(), self.session_id_snake.as_deref()),
+            (Some(a), Some(b)) if !a.trim().is_empty() && !b.trim().is_empty() && a.trim() != b.trim())
+    }
+
     fn session_id(&self) -> Option<&str> {
         self.session_id
             .as_deref()
             .map(str::trim)
             .filter(|session_id| !session_id.is_empty())
+            .or_else(|| {
+                self.session_id_snake
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+            })
             .or_else(|| session_id_from_entries(self.extra.iter()))
             .or_else(|| {
                 self.message
@@ -1094,6 +1107,10 @@ where
             result.malformed_lines = result.malformed_lines.saturating_add(1);
             return true;
         };
+        if event.conflicting_session_ids() {
+            result.malformed_lines = result.malformed_lines.saturating_add(1);
+            return true;
+        }
         if event.is_vertex_ai_usage_entry() {
             return true;
         }
