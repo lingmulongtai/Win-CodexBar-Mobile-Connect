@@ -69,6 +69,7 @@ mod windows {
     const IO_TIMEOUT: Duration = Duration::from_secs(5);
     const MAX_FRAME: usize = 64 * 1024;
     const USAGE_INTERVAL: Duration = Duration::from_secs(300);
+    const INCOMPLETE_USAGE_RETRY_INTERVAL: Duration = Duration::from_secs(30);
     static SETTINGS: OnceLock<watch::Sender<bool>> = OnceLock::new();
 
     pub fn install(enabled: bool) {
@@ -223,6 +224,7 @@ mod windows {
             tokio::task::JoinHandle<Option<codexbar::discord_presence::UsagePeriods>>,
         >; 2] = [None, None];
         let mut usage_refreshed: [Option<Instant>; 2] = [None, None];
+        let mut usage_failures = [0_u8; 2];
         let mut usage_day = None;
         let mut usage_task_valid = [false; 2];
         let metadata_slot = Arc::new(tokio::sync::Semaphore::new(1));
@@ -231,6 +233,7 @@ mod windows {
                 usage_task_valid = [false; 2];
                 usage = [None, None];
                 usage_refreshed = [None, None];
+                usage_failures = [0; 2];
                 usage_day = None;
                 if let Some(mut current) = stream.take() {
                     let _result = set_activity(&mut current, None).await;
@@ -265,12 +268,14 @@ mod windows {
                 usage_task_valid = [false; 2];
                 usage = [None, None];
                 usage_refreshed = [None, None];
+                usage_failures = [0; 2];
             }
             usage_day = Some(today);
             if !tokens_enabled {
                 usage_task_valid = [false; 2];
                 usage = [None, None];
                 usage_refreshed = [None, None];
+                usage_failures = [0; 2];
             } else {
                 use codexbar::agent_sessions::AgentSessionProvider::{Claude, Codex};
                 for (index, provider) in [Codex, Claude].into_iter().enumerate() {
@@ -282,12 +287,27 @@ mod windows {
                         let completed = task.await.unwrap_or(None);
                         if usage_task_valid[index] {
                             usage[index] = completed;
+                            usage_failures[index] = if completed.is_some() {
+                                0
+                            } else {
+                                usage_failures[index].saturating_add(1)
+                            };
                             usage_refreshed[index] = Some(Instant::now());
                         }
                     }
                     if usage_tasks[index].is_none()
-                        && usage_refreshed[index]
-                            .is_none_or(|time| time.elapsed() >= USAGE_INTERVAL)
+                        && usage_refreshed[index].is_none_or(|time| {
+                            time.elapsed()
+                                >= if usage[index].is_some() {
+                                    USAGE_INTERVAL
+                                } else {
+                                    INCOMPLETE_USAGE_RETRY_INTERVAL
+                                        .saturating_mul(
+                                            1_u32 << usage_failures[index].saturating_sub(1).min(4),
+                                        )
+                                        .min(USAGE_INTERVAL)
+                                }
+                        })
                     {
                         usage_tasks[index] = Some(tokio::task::spawn_blocking(move || {
                             codexbar::discord_presence::usage_periods(provider, now)
