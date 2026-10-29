@@ -570,13 +570,11 @@ pub(super) fn scan_codex_detailed_with_cache(
     let preserving_previous_report = cache.codex_scan_incomplete
         && cache.previous_report.is_some()
         && !cancelled_with_missing_cache_rows;
-    let current_window_report = (cache.codex_scan_incomplete && !is_cancelled(cancel))
-        .then(|| codex_current_window_report(&cache, &range))
+    let current_window_summary = (cache.codex_scan_incomplete && !is_cancelled(cancel))
+        .then(|| codex_current_window_summary(&cache, &range, start_date, today))
         .flatten();
-    let published_current_window = current_window_report.is_some();
-    summary = if let Some(report) = current_window_report {
-        let mut summary = summary_from_cached_report(&report, start_date, today);
-        summary.history_coverage_established = true;
+    let published_current_window = current_window_summary.is_some();
+    summary = if let Some(summary) = current_window_summary {
         summary
     } else if preserving_previous_report {
         cache

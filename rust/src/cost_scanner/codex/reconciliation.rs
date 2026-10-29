@@ -6,9 +6,7 @@ pub(super) fn paused_codex_summary(
     today: NaiveDate,
     range: &CostUsageDayRange,
 ) -> CostSummary {
-    if let Some(report) = codex_current_window_report(cache, range) {
-        let mut summary = summary_from_cached_report(&report, start_date, today);
-        summary.history_coverage_established = true;
+    if let Some(summary) = codex_current_window_summary(cache, range, start_date, today) {
         return summary;
     }
 
@@ -81,6 +79,28 @@ pub(super) fn codex_current_window_report(
     (codex_current_window_is_established(cache, range)
         && codex_current_window_has_evidence(cache, range))
     .then(|| JsonlScanner::cached_cost_report_for_range(cache, range))
+}
+
+/// Rebuild the model breakdown from the same validated day map as the
+/// current-window report. A cached report alone has no model rows, so using
+/// it here would silently discard the estimated cost in Usage & Spend.
+pub(super) fn codex_current_window_summary(
+    cache: &CostUsageCache,
+    range: &CostUsageDayRange,
+    start_date: NaiveDate,
+    today: NaiveDate,
+) -> Option<CostSummary> {
+    let report = codex_current_window_report(cache, range)?;
+    let mut summary = CostSummary {
+        period_start: Some(start_date),
+        period_end: Some(today),
+        sessions_count: u32::try_from(report.sessions_count.max(0)).unwrap_or(0),
+        history_coverage_established: true,
+        ..CostSummary::default()
+    };
+    let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, range);
+    summary.total_cost_usd = cost;
+    Some(summary)
 }
 
 fn codex_pending_path_affects_current_window(
@@ -277,6 +297,24 @@ mod tests {
         let report = codex_current_window_report(&cache, &range).unwrap();
         assert_eq!(report.input_tokens, 100);
         assert_eq!(report.sessions_count, 1);
+
+        let day = NaiveDate::from_ymd_opt(2026, 9, 19).unwrap();
+        let summary = codex_current_window_summary(&cache, &range, day, day).unwrap();
+        assert!(summary.history_coverage_established);
+        assert_eq!(summary.input_tokens, 100);
+        assert_eq!(summary.sessions_count, 1);
+        assert!(
+            summary
+                .by_model
+                .get("gpt-5.6-sol")
+                .is_some_and(|cost| *cost > 0.0)
+        );
+        assert_eq!(summary.by_model_tokens["gpt-5.6-sol"].input_tokens, 100);
+        assert!(summary.total_cost_usd > 0.0);
+
+        let paused = paused_codex_summary(&cache, day, day, &range);
+        assert_eq!(paused.by_model, summary.by_model);
+        assert_eq!(paused.by_model_tokens, summary.by_model_tokens);
     }
 
     #[test]
