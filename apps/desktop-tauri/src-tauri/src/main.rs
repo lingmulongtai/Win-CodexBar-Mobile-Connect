@@ -268,6 +268,7 @@ fn main() {
             status_poller::get_provider_statuses,
             commands::get_settings_snapshot,
             discord_presence::resolve_codex_pet,
+            discord_presence::get_discord_presence_status,
             commands::get_currency_rates,
             stay_awake::get_stay_awake_status,
             commands::list_agent_sessions,

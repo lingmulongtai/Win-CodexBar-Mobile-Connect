@@ -19,6 +19,8 @@ pub struct UsagePeriods {
     pub today: u64,
     pub week: u64,
     pub month: u64,
+    /// Calendar totals rebuilt from currently readable local files only.
+    pub local_files_only: bool,
 }
 
 fn compact_tokens(n: u64) -> String {
@@ -48,14 +50,19 @@ pub fn usage_periods(provider: AgentSessionProvider, now: DateTime<Utc>) -> Opti
     } else {
         false
     };
+    let today = crate::cost_reporting_period::cost_bucket_zone().date(now);
+    if provider == AgentSessionProvider::Codex && !codex_coverage {
+        let (history_today, history) = crate::cost_scanner::isolated_codex_presence_history(now)?;
+        let mut periods = periods_from_days(&history, history_today)?;
+        periods.local_files_only = true;
+        return Some(periods);
+    }
     let (history, incomplete) = crate::cost_scanner::get_daily_token_history(name, 31);
-    // The chart's Codex incomplete flag treats absent (zero-use) days as
-    // uncovered. The independently checked summary establishes coverage for
-    // the full window, including those legitimate empty days.
+    // Codex coverage comes from the summary because zero-use days need not
+    // have entries in the chart's per-day cache.
     if !history_usable(provider, codex_coverage, incomplete) {
         return None;
     }
-    let today = crate::cost_reporting_period::cost_bucket_zone().date(now);
     periods_from_days(&history, today)
 }
 
@@ -112,9 +119,12 @@ pub fn idle_activity_with_usage(
     }
     if let Some(p) = periods {
         activity["state"] = json!(format!(
-            "📊 D {} · W {} · M {}",
+            "📊 D{} {} · W{} {} · M{} {}",
+            if p.local_files_only { "~" } else { "" },
             compact_tokens(p.today),
+            if p.local_files_only { "~" } else { "" },
             compact_tokens(p.week),
+            if p.local_files_only { "~" } else { "" },
             compact_tokens(p.month)
         ));
     }
@@ -280,13 +290,25 @@ pub fn activity_for_session_with_options(
     }
     if let Some(p) = periods {
         if options.show_today {
-            labels.push(format!("D {}", compact_tokens(p.today)));
+            labels.push(format!(
+                "D{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.today)
+            ));
         }
         if options.show_week {
-            labels.push(format!("W {}", compact_tokens(p.week)));
+            labels.push(format!(
+                "W{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.week)
+            ));
         }
         if options.show_month {
-            labels.push(format!("M {}", compact_tokens(p.month)));
+            labels.push(format!(
+                "M{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.month)
+            ));
         }
     }
     if !labels.is_empty() {
@@ -358,13 +380,25 @@ pub fn idle_activity_with_options(
     let mut labels = Vec::new();
     if let Some(p) = periods {
         if options.show_today {
-            labels.push(format!("D {}", compact_tokens(p.today)));
+            labels.push(format!(
+                "D{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.today)
+            ));
         }
         if options.show_week {
-            labels.push(format!("W {}", compact_tokens(p.week)));
+            labels.push(format!(
+                "W{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.week)
+            ));
         }
         if options.show_month {
-            labels.push(format!("M {}", compact_tokens(p.month)));
+            labels.push(format!(
+                "M{} {}",
+                if p.local_files_only { "~" } else { "" },
+                compact_tokens(p.month)
+            ));
         }
     }
     if !labels.is_empty() {
@@ -451,6 +485,7 @@ mod tests {
                 today: 1,
                 week: 2,
                 month: 3,
+                local_files_only: false,
             }),
             &options,
         );
@@ -575,11 +610,27 @@ mod tests {
                 today: 1000,
                 week: 2400,
                 month: 11000,
+                local_files_only: false,
             }),
         );
         assert_eq!(activity["details"], "💤 Claude Code · idle");
         assert_eq!(activity["state"], "📊 D 1.0k · W 2.4k · M 11.0k");
         assert!(activity.get("timestamps").is_none());
+    }
+
+    #[test]
+    fn current_files_only_calendar_totals_are_marked() {
+        let activity = idle_activity_with_options(
+            Some(AgentSessionProvider::Codex),
+            Some(UsagePeriods {
+                today: 1000,
+                week: 2000,
+                month: 3000,
+                local_files_only: true,
+            }),
+            &DiscordPresenceOptions::default(),
+        );
+        assert_eq!(activity["state"], "📊 D~ 1.0k · W~ 2.0k · M~ 3.0k");
     }
 
     #[test]
@@ -601,6 +652,7 @@ mod tests {
                 today: 2000,
                 week: 3000,
                 month: 4000,
+                local_files_only: false,
             }),
         )
         .unwrap();
