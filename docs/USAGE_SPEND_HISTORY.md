@@ -55,14 +55,26 @@ copy. Restored input, cache, output and reasoning counters use the same merging
 rules as live data. The summary identifies restored backup sessions and labels
 the amount as an API list-price estimate.
 
-The October 2026 recovery selected only the four approved, reconcilable complete
-sessions; the inconsistent fifth session was excluded. Original backups were
-preserved. No local history, sidecars, session IDs or account data are committed
-to this repository.
+Additional independently reconciled history may be stored in a separate
+`saved-codex-history-extra.json` with its own backup digest. Duplicate IDs are
+excluded across both files. Since deleted source files cannot verify whether a
+long-context cumulative delta represents a single request, nonlinear prices for
+such rows remain unpriced. Rows with unresolved identity or inconsistent
+counters are excluded. No history or account data is committed to this repository.
+
+## Account total and diagnostics
+
+The settings page separately reads the signed-in default Codex CLI account's
+profile via `account/usage/read`. The account lifetime token total is a server
+value; it must not be combined with the local model or cost estimates. The server
+response does not supply a lifetime model-by-model cost breakdown. Missing or
+unsupported account data is shown as unavailable. The Usage & Spend diagnostic
+panel shows the existing redacted log tail, including fixed stage names and elapsed
+times, without recording local paths, token values, or account identifiers.
 
 ## Upstream review
 
-On 2026-10-29 the read-only upstream default branch was fetched again at
+On 2026-10-30 the read-only upstream default branch was fetched again at
 `1d3c1305bfb643b6ea643d176bdc31c381ba27b1`, unchanged from the prior review.
 No new mainline changes were available to incorporate. The separate OpenCode
 history integration remains deferred for the fork-specific collector/settings
