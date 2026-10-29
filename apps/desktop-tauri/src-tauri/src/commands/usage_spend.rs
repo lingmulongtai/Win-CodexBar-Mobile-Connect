@@ -328,9 +328,10 @@ pub(crate) async fn get_local_usage_spend_summary(
         if let Some(owner) = built.refresh_owner.as_ref() {
             clear_usage_spend_refresh_if_owned(owner);
         }
-        let mut summary = built.summary;
-        clear_summary_refreshing(&mut summary);
-        return Ok(summary);
+        return Err(
+            "Usage history settings changed during refresh; retrying with the current source"
+                .into(),
+        );
     }
     // A late build with the same cache key must not overwrite a newer generation.
     // Keep the coordinator lock through publication so begin() cannot race it.
@@ -460,12 +461,17 @@ fn usage_spend_cache_key(
     period: CostReportingPeriod,
     settings: &codexbar::settings::Settings,
 ) -> String {
-    usage_spend_cache_key_with_privacy(
+    let base = usage_spend_cache_key_with_privacy(
         cached,
         &period.identity(Utc::now(), CostTimeZone::Local),
         settings.open_codex_usage_logs_enabled,
         settings.hide_native_codex_cost_when_open_codex_present,
         settings.hide_personal_info,
+    );
+    format!(
+        "{}|{:?}",
+        base,
+        codexbar::core::JsonlScanner::default_codex_cache_root()
     )
 }
 
@@ -588,6 +594,7 @@ fn build_usage_spend_summary(
         )
     });
 
+    let codex_restored = codex_period_summary.restored_sessions;
     let codex_stale = !codex_30_summary.history_coverage_established;
     let codex_status = codex_stale.then(|| {
         codexbar::core::JsonlScanner::load_cache_status(codexbar::core::ProviderId::Codex, None)
@@ -705,7 +712,14 @@ fn build_usage_spend_summary(
                 source: if include_opencodex && !codex_30_contract.imports.is_empty() {
                     "local logs + OpenCodex".to_string()
                 } else {
-                    "local logs".to_string()
+                    format!(
+                        "local logs{} · API list-price estimate",
+                        if codex_restored > 0 {
+                            format!(" + {codex_restored} restored backup sessions")
+                        } else {
+                            String::new()
+                        }
+                    )
                 },
                 refreshing: codex_stale,
                 stale_updated_at: codex_stale_updated_at.clone(),
@@ -1473,14 +1487,16 @@ mod cache_key_tests {
         let mut row = trend_row("codex", "USD", &[]);
         row.refreshing = true;
         summary.rows.push(row);
-        let mut coordinator = UsageSpendCoordinator::default();
-        coordinator.cache = Some(CachedUsageSpendSummary {
-            generation: 0,
-            key: "day|30".into(),
-            summary,
-            refresh_owner: None,
-            built_at: Instant::now() - Duration::from_secs(11),
-        });
+        let mut coordinator = UsageSpendCoordinator {
+            cache: Some(CachedUsageSpendSummary {
+                generation: 0,
+                key: "day|30".into(),
+                summary,
+                refresh_owner: None,
+                built_at: Instant::now() - Duration::from_secs(11),
+            }),
+            ..UsageSpendCoordinator::default()
+        };
         assert!(coordinator.reusable("day|30", false).is_none());
         coordinator.cache.as_mut().unwrap().summary.rows[0].history_paused = true;
         assert!(coordinator.reusable("day|30", false).is_some());
