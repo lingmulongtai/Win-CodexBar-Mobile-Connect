@@ -1,7 +1,7 @@
 //! CodexBar-owned SQLite sidecar for Workspaces snapshots.
 //!
 //! Never attaches to or writes Codex's `state_5.sqlite`. Schema version 5 and
-//! payload format 3 match upstream; foreign `user_version` values are refused.
+//! payload format 5 is local; foreign `user_version` values are refused.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use super::types::CodexLocalProjectUsageSnapshot;
 
 pub const SCHEMA_VERSION: i32 = 5;
-pub const PAYLOAD_FORMAT_VERSION: i32 = 4;
+pub const PAYLOAD_FORMAT_VERSION: i32 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SidecarError {
