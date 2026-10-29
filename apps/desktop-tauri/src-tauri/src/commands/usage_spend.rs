@@ -528,6 +528,19 @@ fn usage_spend_cache_key_with_privacy(
     )
 }
 
+/// Log only fixed stage names and elapsed time; never include local paths or usage data.
+fn trace_spend_stage<T>(stage: &'static str, work: impl FnOnce() -> T) -> T {
+    let started = std::time::Instant::now();
+    tracing::info!(stage, "usage spend stage started");
+    let result = work();
+    tracing::info!(
+        stage,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "usage spend stage finished"
+    );
+    result
+}
+
 fn build_usage_spend_summary(
     cached: &[ProviderUsageSnapshot],
     period: CostReportingPeriod,
@@ -560,11 +573,15 @@ fn build_usage_spend_summary(
     ) = std::thread::scope(|scope| {
         let codex = scope.spawn(move || {
             let (seven, thirty, selected) = scan_codex_spend_periods(period, |requested| {
-                CostScanner::for_period(requested)
-                    .with_options(codex_scan_options)
-                    .scan_codex()
+                trace_spend_stage("codex period scan", || {
+                    CostScanner::for_period(requested)
+                        .with_options(codex_scan_options)
+                        .scan_codex()
+                })
             });
-            let activity = daily_token_activity("codex", TOKEN_ACTIVITY_DAYS);
+            let activity = trace_spend_stage("codex annual activity", || {
+                daily_token_activity("codex", TOKEN_ACTIVITY_DAYS)
+            });
             (seven, thirty, selected, activity)
         });
         let claude = scope.spawn(|| {
@@ -576,7 +593,9 @@ fn build_usage_spend_summary(
                 CostScanner::for_period(period)
                     .scan_claude_with_cancel_and_pi_sessions(None, include_pi_in_native)
             });
-            let activity = daily_token_activity("claude", TOKEN_ACTIVITY_DAYS);
+            let activity = trace_spend_stage("claude annual activity", || {
+                daily_token_activity("claude", TOKEN_ACTIVITY_DAYS)
+            });
             (seven, thirty, selected, activity)
         });
         let pi = scope.spawn(|| {
@@ -623,14 +642,16 @@ fn build_usage_spend_summary(
         settings.hide_personal_info,
         codex_30_summary.clone(),
     );
-    let codex_period_contract = build_contract_from_period_summary(
-        "codex",
-        period,
-        include_opencodex,
-        hide_native,
-        settings.hide_personal_info,
-        codex_period_summary,
-    );
+    let codex_period_contract = trace_spend_stage("codex period details", || {
+        build_contract_from_period_summary(
+            "codex",
+            period,
+            include_opencodex,
+            hide_native,
+            settings.hide_personal_info,
+            codex_period_summary,
+        )
+    });
     let pi_period_contract = build_contract_from_period_summary(
         "pi",
         period,
