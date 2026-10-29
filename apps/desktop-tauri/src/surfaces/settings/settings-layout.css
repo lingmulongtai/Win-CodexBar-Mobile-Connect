@@ -1950,3 +1950,10 @@
   outline: 2px solid var(--accent, #0a84ff);
   outline-offset: 1px;
 }
+
+.discord-preview { padding: 16px; color: #f2f3f5; background: #2b2d31; font-size: 13px; }
+.discord-preview__body { display: flex; align-items: flex-start; gap: 12px; line-height: 1.55; }
+.discord-preview__body img { width: 76px; height: 76px; object-fit: contain; border-radius: 10px; background: #111; }
+.discord-preview__body strong { font-size: 15px; }
+.discord-preview__button { display: block; width: 100%; border: 0; color: inherit; cursor: pointer; margin-top: 14px; padding: 8px; background: #4e5058; border-radius: 4px; text-align: center; }
+.discord-image-url { width: min(280px, 100%); }

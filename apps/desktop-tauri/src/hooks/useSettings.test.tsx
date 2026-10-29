@@ -189,6 +189,28 @@ describe("useSettings update", () => {
     expect(result.current.settings.windowScalePercent).toBe(150);
   });
 
+  it("serializes overlapping Discord changes and refreshes their persisted values", async () => {
+    const first = deferred<SettingsSnapshot>();
+    const second = deferred<SettingsSnapshot>();
+    const initial = { discordPresenceOptions: { priority: "recent", showModel: true } } as unknown as SettingsSnapshot;
+    const afterFirst = { discordPresenceOptions: { priority: "claude", showModel: true } } as unknown as SettingsSnapshot;
+    const onDisk = { discordPresenceOptions: { priority: "claude", showModel: false } } as unknown as SettingsSnapshot;
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(initial);
+    tauriMocks.updateSettings.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result } = renderHook(() => useSettings(initial));
+    await act(async () => {});
+    let a!: Promise<void>; let b!: Promise<void>;
+    act(() => { a = result.current.update({ discordPresenceOptions: { priority: "claude" } }); });
+    act(() => { b = result.current.update({ discordPresenceOptions: { showModel: false } }); });
+    await act(async () => {});
+    expect(tauriMocks.updateSettings).toHaveBeenCalledTimes(1);
+    await act(async () => { first.resolve(afterFirst); await a; });
+    await waitFor(() => expect(tauriMocks.updateSettings).toHaveBeenCalledTimes(2));
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(onDisk);
+    await act(async () => { second.resolve(onDisk); await b; });
+    expect(result.current.settings.discordPresenceOptions).toEqual(onDisk.discordPresenceOptions);
+  });
+
   it("ignores a stale failure that arrives after a newer save succeeded", async () => {
     const first = deferred<SettingsSnapshot>();
     const second = deferred<SettingsSnapshot>();
