@@ -425,6 +425,7 @@ UsageSpendApiEstimate = API list-price estimate
 UsageSpendVendorMetered = Vendor metered
 UsageSpendMixedSources = Mixed sources
 UsageSpendUnknown = Unknown
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = unpriced
 UsageSpendHistoryCovered = History covered
 UsageSpendCustomPricingActive = Custom pricing active

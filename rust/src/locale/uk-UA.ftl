@@ -425,6 +425,7 @@ UsageSpendApiEstimate = Оцінка за прайсом API
 UsageSpendVendorMetered = Дані провайдера
 UsageSpendMixedSources = Змішані джерела
 UsageSpendUnknown = Невідомо
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = без ціни
 UsageSpendHistoryCovered = Історія повна
 UsageSpendCustomPricingActive = Власні ціни ввімкнено

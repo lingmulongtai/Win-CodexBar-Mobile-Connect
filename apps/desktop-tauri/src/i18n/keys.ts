@@ -612,6 +612,7 @@ export const ALL_LOCALE_KEYS = [
   "UsageSpendMixedSources",
   "UsageSpendUnknown",
   "UsageSpendUnpriced",
+  "UsageSpendPartialCost",
   "UsageSpendHistoryCovered",
   "UsageSpendPartialHistory",
   "UsageSpendCustomPricingActive",

@@ -38,6 +38,13 @@ export function compareSpendProviderGroups(a: SpendProviderGroup, b: SpendProvid
   );
 }
 
+/** Include verified model portions only in the explicitly marked provider subtotal. */
+function providerKnownSubtotal(contract: SpendContract): number | null {
+  const partials = contract.models.reduce((sum, model) => sum + (model.partialCostUsd ?? 0), 0);
+  if (!Number.isFinite(partials) || partials <= 0) return contract.knownCostUsd;
+  return (contract.knownCostUsd ?? 0) + partials;
+}
+
 /**
  * Group the contract's model rows by the provider that produced them.
  *
@@ -54,7 +61,7 @@ export function buildSpendProviderGroups(
   const group: SpendProviderGroup = {
     providerId: contract.providerId,
     displayName: providerName,
-    costUsd: contract.knownCostUsd,
+    costUsd: providerKnownSubtotal(contract),
     totalTokens: Number.isSafeInteger(totalTokens) ? totalTokens : null,
     costIsPartial: contract.priceCoverage.unpriced > 0,
     hasPartialModelHistory: !contract.historyCoverageEstablished,
@@ -79,7 +86,7 @@ export function buildSpendProviderRowGroups(
       return {
         providerId: row.providerId,
         displayName: row.displayName,
-        costUsd: row.periodCost,
+        costUsd: isContract ? providerKnownSubtotal(contract) : row.periodCost,
         totalTokens: row.periodTokens,
         costIsPartial: isContract && contract.priceCoverage.unpriced > 0,
         hasPartialModelHistory: isContract && contract.models.length > 0 && !contract.historyCoverageEstablished,

@@ -67,7 +67,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
                     <SpendProviderIcon providerId={group.providerId} />
                     <strong>{group.displayName}</strong>
                   </span>
-                  <span>{groupMetric(group, t("UsageSpendTokens"))}</span>
+                  <span>{groupMetric(group, t)}</span>
                   <span aria-hidden="true">{group.models.length === 0 ? "" : isCollapsed ? "▸" : "▾"}</span>
                 </button>
                 {group.row && <RowDetail row={group.row} t={t} />}
@@ -89,7 +89,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
                             {model.customPricing ? " · " + t("UsageSpendCustomPricing") : ""}
                           </span>
                         </span>
-                        <span>{model.costUsd == null ? t("UsageSpendUnpriced") : formatUsd(model.costUsd, "USD")}</span>
+                        <span>{model.costUsd != null ? formatUsd(model.costUsd, "USD") : model.partialCostUsd != null ? `${formatUsd(model.partialCostUsd, "USD")} · ${t("UsageSpendPartialCost")}` : t("UsageSpendUnpriced")}</span>
                       </div>
                     ))}
                     {group.models.length > PROVIDER_MODEL_DISPLAY_LIMIT && (
@@ -132,9 +132,9 @@ function RowDetail({ row, t }: { row: NonNullable<SpendProviderGroup["row"]>; t:
   );
 }
 
-function groupMetric(group: SpendProviderGroup, tokenLabel: string): string {
+function groupMetric(group: SpendProviderGroup, t: (key: LocaleKey) => string): string {
   const parts: string[] = [];
-  if (group.costUsd != null) parts.push(`${group.costIsPartial ? "~" : ""}${formatUsd(group.costUsd, group.currency ?? "USD")}`);
-  if (group.totalTokens != null) parts.push(`${group.totalTokens.toLocaleString()} ${tokenLabel}`);
+  if (group.costUsd != null) parts.push(`${formatUsd(group.costUsd, group.currency ?? "USD")}${group.costIsPartial ? ` (${t("UsageSpendPartialCost")})` : ""}`);
+  if (group.totalTokens != null) parts.push(`${group.totalTokens.toLocaleString()} ${t("UsageSpendTokens")}`);
   return parts.length > 0 ? parts.join(" · ") : "—";
 }

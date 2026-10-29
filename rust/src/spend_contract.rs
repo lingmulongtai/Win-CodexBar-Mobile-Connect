@@ -125,6 +125,9 @@ pub struct SpendModelRow {
     pub model: String,
     /// None = unknown/unpriced. Some(0.0) = known free.
     pub cost_usd: Option<f64>,
+    /// Known priced portion when the full model cost cannot be established.
+    #[serde(default)]
+    pub partial_cost_usd: Option<f64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -826,9 +829,22 @@ fn model_rows(
                     .copied()
                     .filter(|value| value.is_finite() && *value >= 0.0)
             };
+            let partial_cost_usd = if cost_usd.is_none()
+                && custom_rates.is_none()
+                && !summary.unknown_models.contains(&model)
+            {
+                summary
+                    .by_model
+                    .get(&model)
+                    .copied()
+                    .filter(|value| value.is_finite() && *value > 0.0)
+            } else {
+                None
+            };
             SpendModelRow {
                 model,
                 cost_usd,
+                partial_cost_usd,
                 input_tokens: counts.input_tokens,
                 output_tokens: counts.output_tokens,
                 cache_read_tokens: counts.cached_tokens,
@@ -1022,7 +1038,15 @@ fn add_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
 fn merge_models(mut left: Vec<SpendModelRow>, right: &[SpendModelRow]) -> Vec<SpendModelRow> {
     for incoming in right {
         if let Some(existing) = left.iter_mut().find(|row| row.model == incoming.model) {
-            existing.cost_usd = sum_optional_cost(existing.cost_usd, incoming.cost_usd);
+            if existing.cost_usd.is_some() && incoming.cost_usd.is_some() {
+                existing.cost_usd = sum_optional_cost(existing.cost_usd, incoming.cost_usd);
+            } else {
+                existing.partial_cost_usd = sum_optional_cost(
+                    existing.cost_usd.or(existing.partial_cost_usd),
+                    incoming.cost_usd.or(incoming.partial_cost_usd),
+                );
+                existing.cost_usd = None;
+            }
             existing.input_tokens = existing.input_tokens.saturating_add(incoming.input_tokens);
             existing.output_tokens = existing
                 .output_tokens

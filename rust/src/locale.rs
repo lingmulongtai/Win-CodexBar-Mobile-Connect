@@ -845,6 +845,7 @@ locale_keys! {
     UsageSpendMixedSources,
     UsageSpendUnknown,
     UsageSpendUnpriced,
+    UsageSpendPartialCost,
     UsageSpendHistoryCovered,
     UsageSpendPartialHistory,
     UsageSpendCustomPricingActive,

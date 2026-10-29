@@ -418,6 +418,7 @@ UsageSpendApiEstimate = Estimativa de preço de tabela da API
 UsageSpendVendorMetered = Medido pelo provedor
 UsageSpendMixedSources = Fontes mistas
 UsageSpendUnknown = Desconhecido
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = sem preço
 UsageSpendHistoryCovered = História coberta
 UsageSpendCustomPricingActive = Preço personalizado ativo
