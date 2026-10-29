@@ -668,3 +668,5 @@ export function getSafeDiagnostics(): Promise<string> {
 }
 
 export const resolveCodexPet = (link: string) => invoke<string>("resolve_codex_pet", { link });
+
+export const getDiscordPresenceStatus = () => invoke<import("../types/bridge").DiscordPresenceStatus>("get_discord_presence_status");

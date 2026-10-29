@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { Field, Select, SettingsGroup, Toggle, useFieldAria } from "../../../components/FormControls";
 import { useLocale } from "../../../hooks/useLocale";
-import { openExternalUrl, resolveCodexPet } from "../../../lib/tauri";
-import type { DiscordPresenceOptions } from "../../../types/bridge";
+import { getDiscordPresenceStatus, openExternalUrl, resolveCodexPet } from "../../../lib/tauri";
+import type { DiscordPresenceOptions, DiscordPresenceStatus } from "../../../types/bridge";
 import type { LocaleKey } from "../../../i18n/keys";
 import type { TabProps } from "../settingsTabs";
-import petImage from "../../../../../../rust/assets/discord/pets/maomao-idle.gif";
 
 const defaults: DiscordPresenceOptions = {
   priority: "recent", format: "detailed", showModel: true, showMode: true,
@@ -87,22 +86,45 @@ function GithubUrl({ value, onChange, disabled }: { value: string; onChange: (v:
   </div>;
 }
 
+function elapsed(start: number, now: number): string {
+  const seconds = Math.max(0, Math.floor(now / 1000 - start));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+    : `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 export default function DiscordTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
-  const [preview, setPreview] = useState("codex");
+  const [snapshot, setSnapshot] = useState<DiscordPresenceStatus | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const [linkError, setLinkError] = useState(false);
   const options = { ...defaults, ...settings.discordPresenceOptions };
   const change = (patch: Partial<DiscordPresenceOptions>) => set({ discordPresenceOptions: patch });
-  const service = preview === "claude" ? "Claude Code" : "Codex";
-  const icon = options.imageUrl || petImage;
-  const prefix = options.showEmoji ? "⚡ " : "";
-  const model = preview === "claude" ? "Claude Sonnet" : "GPT-5.5";
-  const hasModel = options.showModel && options.format !== "service";
-  const identity = hasModel
-    ? options.format === "modelFirst" ? `${model} · ${service}` : options.format === "compact" ? `${service}: ${model}` : `${service} · ${model}`
-    : `${options.format === "compact" ? "" : "Using "}${service}`;
-  const details = preview === "idle" ? `${options.showEmoji ? "💤 " : ""}Codex · idle` : `${prefix}${identity}${options.showMode ? ` (High) · ${options.showEmoji ? "🚀 " : ""}${preview === "codex" ? "Fast requested" : "Fast"}` : ""}`;
-  const labels = [options.showSessionTokens && preview !== "idle" && "S 2.3k", options.showToday && "D 12.4k", options.showWeek && "W 48.2k", options.showMonth && "M 120.0k"].filter(Boolean).join(" · ");
+  useEffect(() => {
+    let cancelled = false;
+    let pending = false;
+    const update = async () => {
+      setNow(Date.now());
+      if (pending) return;
+      pending = true;
+      try {
+        const value = await getDiscordPresenceStatus();
+        if (!cancelled) { setSnapshot(value); setFailed(false); }
+      } catch {
+        if (!cancelled) { setSnapshot(null); setFailed(true); }
+      } finally { pending = false; }
+    };
+    void update();
+    const timer = window.setInterval(() => void update(), 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+  const activity = snapshot?.status === "connected" ? snapshot.activity : null;
+  const usageLabels: Record<DiscordPresenceStatus["usage"], LocaleKey> = {
+    available: "DiscordUsageAvailable", partial: "DiscordUsagePartial", partialLoading: "DiscordUsagePartialLoading",
+    loading: "DiscordUsageLoading", unavailable: "DiscordUsageUnavailable", trackingOff: "DiscordUsageTrackingOff", hidden: "DiscordUsageHidden",
+  };
   return <>
     <SettingsGroup title={t("DiscordPresenceLabel")}>
       <Field label={t("DiscordPresenceLabel")} description={t("DiscordPresenceHelper")}>
@@ -110,17 +132,24 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
       </Field>
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPreview")} footer={t("DiscordPreviewHelp")}>
-      <Field label={t("DiscordPreviewProvider")}><Select value={preview} onChange={setPreview} options={[
-        { value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "idle", label: t("DiscordPreviewIdle") },
-      ]} /></Field>
-      <div className="discord-preview">
-        <div className="discord-preview__body"><img src={icon} alt="" /><div><strong>Win-CodexBar + Mobile Connect</strong><div>{details}</div>{labels && <div>{options.showEmoji ? "📊 " : ""}{labels}</div>}{options.showElapsed && preview !== "idle" && <div>00:23 elapsed</div>}</div></div>
-        {options.showGithub && <button type="button" className="discord-preview__button" onClick={() => {
-          setLinkError(false);
-          void openExternalUrl(isGithubUrl(options.githubUrl) ? options.githubUrl : defaultGithubUrl).catch(() => setLinkError(true));
-        }}>View on GitHub</button>}
-        {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
-      </div>
+      {activity ? <>
+        <div className="discord-preview">
+          <div className="discord-preview__body">
+            {activity.assets?.large_image && <img src={activity.assets.large_image} alt="" />}
+            <div><strong>Win-CodexBar + Mobile Connect</strong>
+              {activity.details && <div>{activity.details}</div>}
+              {activity.state && <div>{activity.state}</div>}
+              {activity.timestamps?.start != null && <div>{elapsed(activity.timestamps.start, now)} elapsed</div>}
+            </div>
+          </div>
+          {activity.buttons?.map((button) => <button key={button.url} type="button" className="discord-preview__button" onClick={() => {
+            setLinkError(false);
+            if (isGithubUrl(button.url)) void openExternalUrl(button.url).catch(() => setLinkError(true));
+          }}>{button.label}</button>)}
+          {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
+        </div>
+        <p role="status">{t(usageLabels[snapshot!.usage])}</p>
+      </> : <p role="status">{t(failed ? "DiscordLiveError" : snapshot?.status === "disabled" ? "DiscordLiveDisabled" : "DiscordLiveConnecting")}</p>}
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPriority")}>
       <Field label={t("DiscordPriority")}><Select value={options.priority} disabled={saving} onChange={(value) => change({ priority: value as DiscordPresenceOptions["priority"] })} options={[
@@ -136,6 +165,11 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
     </Field>)}</SettingsGroup>
     <SettingsGroup title={t("DiscordGithubSettings")} footer={t("DiscordGithubHelp")}>
       <Field label={t("DiscordGithubUrl")}><GithubUrl value={options.githubUrl} onChange={(githubUrl) => change({ githubUrl })} disabled={saving} /></Field>
+      <Field label={t("DiscordGithubTest")}><button type="button" onClick={() => {
+        setLinkError(false);
+        void openExternalUrl(isGithubUrl(options.githubUrl) ? options.githubUrl : defaultGithubUrl).catch(() => setLinkError(true));
+      }}>{t("DiscordGithubTest")}</button></Field>
+      {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPet")} footer={t("DiscordPetHelp")}>
       <Field label={t("DiscordPetUrl")}><ImageUrl value={options.imageUrl} onChange={(imageUrl) => change({ imageUrl })} disabled={saving} /></Field>
