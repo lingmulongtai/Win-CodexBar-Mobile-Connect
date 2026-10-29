@@ -9,13 +9,15 @@ use std::{
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{
     agent_sessions::AgentSessionProvider,
     core::{CostUsageDayRange, JsonlScanner},
 };
 
-const MAX_TRANSCRIPT_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg(test)]
+const LARGE_SESSION_TEST_THRESHOLD: u64 = 16 * 1024 * 1024;
 const MAX_CLAUDE_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
 
 struct ClaudeTokenCache {
@@ -191,7 +193,7 @@ pub(super) fn read(
         None
     } else {
         match provider {
-            AgentSessionProvider::Codex if size <= MAX_TRANSCRIPT_BYTES => codex_tokens(path, now),
+            AgentSessionProvider::Codex => codex_tokens(path, now),
             AgentSessionProvider::Claude => claude_tokens(path),
             _ => None,
         }
@@ -308,15 +310,59 @@ fn scan_lines(
     }
 }
 
+struct CodexTokenCache {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+    day: NaiveDate,
+    tokens: Option<u64>,
+}
+static CODEX_TOKEN_CACHE: OnceLock<Mutex<Option<CodexTokenCache>>> = OnceLock::new();
+
+// Hash only the fixed prefix; an active session may append while it is read.
+fn codex_prefix_digest(path: &Path, len: u64) -> Option<[u8; 32]> {
+    let mut file = File::open(path).ok()?;
+    let mut digest = Sha256::new();
+    let mut remaining = len;
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining > 0 {
+        let wanted = usize::try_from(remaining.min(64 * 1024)).ok()?;
+        let count = file.read(&mut buffer[..wanted]).ok()?;
+        if count == 0 {
+            return None;
+        }
+        digest.update(&buffer[..count]);
+        remaining -= u64::try_from(count).ok()?;
+    }
+    Some(digest.finalize().into())
+}
+
 fn codex_tokens(path: &Path, now: DateTime<Utc>) -> Option<u64> {
+    let before = path.metadata().ok()?;
+    let len = before.len();
+    let modified = before.modified().ok()?;
+    let day = now.date_naive();
+    let cache = CODEX_TOKEN_CACHE.get_or_init(|| Mutex::new(None));
+    {
+        let entry = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = entry
+            .as_ref()
+            .filter(|e| e.path == path && e.len == len && e.modified == modified && e.day == day)
+        {
+            return entry.tokens;
+        }
+    }
+    let fingerprint = codex_prefix_digest(path, len)?;
     let metadata = JsonlScanner::read_codex_session_metadata(path).ok()?;
     // Child rollouts can include inherited counters. Without the parent baseline
     // they cannot be labelled as this session's own usage.
     if metadata.lineage.uses_parent_baseline() {
         return None;
     }
-    let range = CostUsageDayRange::new(NaiveDate::from_ymd_opt(1970, 1, 1)?, now.date_naive());
-    let parsed = JsonlScanner::parse_codex_file_with_state_bounded(
+    let range = CostUsageDayRange::new(NaiveDate::from_ymd_opt(1970, 1, 1)?, day);
+    // A single streaming pass preserves the parser's cumulative-watermark state.
+    // Freeze the target so a live session cannot extend the scan indefinitely.
+    let parsed = JsonlScanner::parse_codex_file_with_state_bounded_target(
         path,
         &range,
         0,
@@ -325,16 +371,34 @@ fn codex_tokens(path: &Path, now: DateTime<Utc>) -> Option<u64> {
         None,
         None,
         None,
-        Some(i64::try_from(MAX_TRANSCRIPT_BYTES).ok()?),
+        Some(i64::try_from(len).ok()?),
+        None,
     )
     .ok()?;
-    if !parsed.is_complete || parsed.records.is_empty() {
+    if !parsed.is_complete
+        || parsed.parsed_bytes != i64::try_from(len).ok()?
+        || parsed.records.is_empty()
+    {
         return None;
     }
-    parsed.records.iter().try_fold(0_u64, |sum, (record, _)| {
+    let tokens = parsed.records.iter().try_fold(0_u64, |sum, (record, _)| {
         sum.checked_add(u64::try_from(record.input).ok()?)?
             .checked_add(u64::try_from(record.output).ok()?)
-    })
+    });
+    let after = path.metadata().ok()?;
+    // Verify the frozen prefix even if the file grew while parsing. This
+    // rejects replacement/truncation rather than silently reporting wrong sums.
+    if after.len() < len || codex_prefix_digest(path, len)? != fingerprint {
+        return None;
+    }
+    *cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(CodexTokenCache {
+        path: path.to_path_buf(),
+        len,
+        modified,
+        day,
+        tokens,
+    });
+    tokens
 }
 
 #[cfg(test)]
@@ -433,7 +497,7 @@ mod tests {
             r#"{{"type":"session_meta","timestamp":"2026-01-01T01:00:00Z","payload":{{"id":"s"}}}}"#
         )
         .unwrap();
-        file.seek(SeekFrom::Start(MAX_TRANSCRIPT_BYTES + 1))
+        file.seek(SeekFrom::Start(LARGE_SESSION_TEST_THRESHOLD + 1))
             .unwrap();
         writeln!(
             file,
@@ -454,7 +518,7 @@ mod tests {
     fn large_claude_session_tokens_refresh_when_the_file_changes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("claude.jsonl");
-        let padding = "x".repeat(usize::try_from(MAX_TRANSCRIPT_BYTES).unwrap() + 1);
+        let padding = "x".repeat(usize::try_from(LARGE_SESSION_TEST_THRESHOLD).unwrap() + 1);
         let row = r#"{"type":"assistant","timestamp":"2026-01-01T01:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":2}}}"#;
         std::fs::write(
             &path,
@@ -470,6 +534,104 @@ mod tests {
         writeln!(file, "{}", row.replace("r1", "r2").replace("m1", "m2")).unwrap();
         drop(file);
         assert_eq!(claude_tokens(&path), Some(24));
+    }
+
+    #[test]
+    fn large_codex_session_is_scanned_and_refreshed_after_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex.jsonl");
+        let padding = "x".repeat(usize::try_from(LARGE_SESSION_TEST_THRESHOLD).unwrap() + 1);
+        let meta =
+            r#"{"type":"session_meta","timestamp":"2026-01-01T01:00:00Z","payload":{"id":"abc"}}"#;
+        let first = r#"{"type":"event_msg","timestamp":"2026-01-01T01:00:02Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":2}}}}"#;
+        std::fs::write(
+            &path,
+            format!("{meta}\n{{\"type\":\"user\",\"padding\":\"{padding}\"}}\n{first}\n"),
+        )
+        .unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(codex_tokens(&path, now), Some(12));
+        use std::io::Write;
+        let second = first
+            .replace("\"input_tokens\":10", "\"input_tokens\":20")
+            .replace("\"output_tokens\":2", "\"output_tokens\":4");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "{second}").unwrap();
+        drop(file);
+        assert_eq!(codex_tokens(&path, now), Some(24));
+    }
+
+    #[test]
+    fn large_codex_session_preserves_cumulative_watermark() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex.jsonl");
+        let padding = "x".repeat(usize::try_from(LARGE_SESSION_TEST_THRESHOLD).unwrap() + 1);
+        let meta =
+            r#"{"type":"session_meta","timestamp":"2026-01-01T01:00:00Z","payload":{"id":"abc"}}"#;
+        let event = |input, output| {
+            serde_json::json!({
+                "type": "event_msg", "timestamp": "2026-01-01T01:00:02Z",
+                "payload": {"type": "token_count", "info": {"total_token_usage": {
+                    "input_tokens": input, "cached_input_tokens": 0, "output_tokens": output
+                }}}
+            })
+            .to_string()
+        };
+        std::fs::write(
+            &path,
+            format!(
+                "{meta}\n{}\n{}\n{{\"type\":\"user\",\"padding\":\"{padding}\"}}\n{}\n",
+                event(100, 20),
+                event(5, 1),
+                event(101, 21)
+            ),
+        )
+        .unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(codex_tokens(&path, now), Some(122));
+    }
+
+    #[test]
+    fn codex_incomplete_tail_is_not_counted_until_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex.jsonl");
+        let meta =
+            r#"{"type":"session_meta","timestamp":"2026-01-01T01:00:00Z","payload":{"id":"abc"}}"#;
+        let event = r#"{"type":"event_msg","timestamp":"2026-01-01T01:00:02Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":2}}}}"#;
+        std::fs::write(&path, format!("{meta}\n{event}\n{{\"type\":")).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(codex_tokens(&path, now), None);
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "\"user\"}}").unwrap();
+        drop(file);
+        assert_eq!(codex_tokens(&path, now), Some(12));
+    }
+
+    #[test]
+    fn codex_prefix_verification_accepts_append_and_detects_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex.jsonl");
+        std::fs::write(&path, b"original").unwrap();
+        let digest = codex_prefix_digest(&path, 8).unwrap();
+        std::fs::write(&path, b"original appended").unwrap();
+        assert_eq!(codex_prefix_digest(&path, 8), Some(digest));
+        std::fs::write(&path, b"modified appended").unwrap();
+        assert_ne!(codex_prefix_digest(&path, 8), Some(digest));
+        std::fs::write(&path, b"short").unwrap();
+        assert_eq!(codex_prefix_digest(&path, 8), None);
     }
 
     #[test]
