@@ -865,7 +865,7 @@ fn copilot_monthly_windows_get_reset_window_pace_in_json_and_text() {
     );
     assert_eq!(text.matches("  Pace:").count(), 2, "{text}");
 
-    // Codex has no reset-window capability: a length-less primary has no pace.
+    // A length-less Codex primary has no reset-window pace.
     let codex = render_json_result(ProviderId::Codex, fetch_result(usage), None, None);
     assert!(codex["pace"].is_null() || codex["pace"]["primary"].is_null());
 }
