@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getUsageSpendSummary: vi.fn(),
+  getCodexAccountUsage: vi.fn(),
+  getSafeDiagnostics: vi.fn(),
   writeUsageSpendExport: vi.fn(),
 }));
 const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
@@ -131,10 +133,36 @@ describe("UsageSpendTab", () => {
     vi.clearAllMocks();
     eventHandlers.clear();
     peerState.current = null;
+    tauriMocks.getSafeDiagnostics.mockResolvedValue("usage spend stage started");
+    tauriMocks.getCodexAccountUsage.mockResolvedValue({ summary: { lifetimeTokens: 12345678901, peakDailyTokens: null }, dailyUsageBuckets: null });
     tauriMocks.getUsageSpendSummary.mockImplementation(
       async (options?: { period?: string }) => summary(options?.period ?? "rolling:30"),
     );
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  it("discards a previous account response after switching accounts", async () => {
+    let resolveOld!: (value: { summary: { lifetimeTokens: number; peakDailyTokens: null }; dailyUsageBuckets: null }) => void;
+    tauriMocks.getCodexAccountUsage.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ summary: { lifetimeTokens: 222, peakDailyTokens: null }, dailyUsageBuckets: null });
+    renderTab();
+    await waitFor(() => expect(eventHandlers.has("codex-accounts-updated")).toBe(true));
+    act(() => eventHandlers.get("codex-accounts-updated")?.());
+    expect(await screen.findByText(/222/)).toBeInTheDocument();
+    await act(async () => resolveOld({ summary: { lifetimeTokens: 111, peakDailyTokens: null }, dailyUsageBuckets: null }));
+    expect(screen.queryByText(/111/)).not.toBeInTheDocument();
+  });
+
+  it("opens the redacted diagnostic log on request", async () => {
+    renderTab();
+    fireEvent.click(screen.getByText("UsageSpendDiagnostics"));
+    expect(await screen.findByText("usage spend stage started")).toBeInTheDocument();
+  });
+
+  it("shows the account lifetime total separately from local usage", async () => {
+    renderTab();
+    expect(await screen.findByText(/12,345,678,901/)).toBeInTheDocument();
+    expect(screen.getByText("CodexAccountUsageCaption")).toBeInTheDocument();
   });
 
   it("publishes the first result and coalesces updates arriving while scans run", async () => {
