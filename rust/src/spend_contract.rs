@@ -771,7 +771,13 @@ fn model_rows(
             // remain unknown rather than falling back to built-in/model.dev rates.
             let cost_usd = if let Some(rates) = custom_rates {
                 rates.cost(&counts)
-            } else if summary.unknown_models.contains(&model) {
+            } else if summary.unknown_models.contains(&model)
+                || matches!(
+                    &summary.model_pricing_completeness,
+                    crate::cost_scanner::ModelPricingCompleteness::Partial { unpriced_models }
+                        if unpriced_models.contains(&model)
+                )
+            {
                 None
             } else {
                 summary

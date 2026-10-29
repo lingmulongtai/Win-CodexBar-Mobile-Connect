@@ -178,6 +178,32 @@ fn included_auto_review_is_free_unless_an_explicit_custom_rate_is_set() {
 }
 
 #[test]
+fn unpriced_routing_usage_is_not_reported_as_free() {
+    let mut summary = CostSummary::default();
+    summary
+        .by_model
+        .insert("codex-auto-review".to_string(), 0.0);
+    summary.by_model_tokens.insert(
+        "codex-auto-review".to_string(),
+        ModelTokenCounts {
+            input_tokens: 1_000_000,
+            ..ModelTokenCounts::default()
+        },
+    );
+    summary.model_pricing_completeness = crate::cost_scanner::ModelPricingCompleteness::Partial {
+        unpriced_models: vec!["codex-auto-review".to_string()],
+    };
+    let rows = model_rows("codex", &summary, &CustomPricing::default());
+    assert_eq!(rows[0].cost_usd, None);
+    assert_eq!(coverage_for_models(&rows).unpriced, 1);
+    let custom = CustomPricing::parse(br#"{"codex-auto-review": {"input": 2.0}}"#);
+    assert_eq!(
+        model_rows("codex", &summary, &custom)[0].cost_usd,
+        Some(2.0)
+    );
+}
+
+#[test]
 fn local_spend_contract_exposes_reasoning_tokens_and_preserves_unknown() {
     let known_summary = CostSummary {
         reasoning_tokens: Some(7),
