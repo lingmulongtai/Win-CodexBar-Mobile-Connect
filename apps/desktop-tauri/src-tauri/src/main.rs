@@ -350,6 +350,7 @@ fn main() {
             commands::get_provider_chart_data,
             commands::get_provider_local_usage_summary,
             commands::get_usage_spend_summary,
+            commands::get_codex_account_usage,
             commands::write_usage_spend_export,
             commands::export_preferences,
             commands::import_preferences,

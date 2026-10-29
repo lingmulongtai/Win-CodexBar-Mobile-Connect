@@ -17,7 +17,7 @@ tauri = { version = "2", features = ["image-png", "tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-single-instance = "2"
-tokio = { version = "1", features = ["rt", "time", "sync", "net", "io-util"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "net", "io-util", "process"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
