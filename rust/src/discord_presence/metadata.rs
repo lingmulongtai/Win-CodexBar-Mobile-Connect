@@ -124,17 +124,16 @@ pub(super) fn read(
         return result;
     }
     let mut tail = Vec::new();
-    if size > METADATA_PREFIX_BYTES {
-        if file
+    if size > METADATA_PREFIX_BYTES
+        && (file
             .seek(SeekFrom::Start(size.saturating_sub(METADATA_TAIL_BYTES)))
             .is_err()
             || (&mut file)
                 .take(METADATA_TAIL_BYTES)
                 .read_to_end(&mut tail)
-                .is_err()
-        {
-            return result;
-        }
+                .is_err())
+    {
+        return result;
     }
     scan_lines(&mut result, &prefix, provider, now, true);
     if !tail.is_empty() {
@@ -267,6 +266,35 @@ fn scan_lines(
     }
 }
 
+fn codex_tokens(path: &Path, now: DateTime<Utc>) -> Option<u64> {
+    let metadata = JsonlScanner::read_codex_session_metadata(path).ok()?;
+    // Child rollouts can include inherited counters. Without the parent baseline
+    // they cannot be labelled as this session's own usage.
+    if metadata.lineage.uses_parent_baseline() {
+        return None;
+    }
+    let range = CostUsageDayRange::new(NaiveDate::from_ymd_opt(1970, 1, 1)?, now.date_naive());
+    let parsed = JsonlScanner::parse_codex_file_with_state_bounded(
+        path,
+        &range,
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(i64::try_from(MAX_TRANSCRIPT_BYTES).ok()?),
+    )
+    .ok()?;
+    if !parsed.is_complete || parsed.records.is_empty() {
+        return None;
+    }
+    parsed.records.iter().try_fold(0_u64, |sum, (record, _)| {
+        sum.checked_add(u64::try_from(record.input).ok()?)?
+            .checked_add(u64::try_from(record.output).ok()?)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,8 +395,7 @@ mod tests {
             .unwrap();
         writeln!(
             file,
-            "\n{}",
-            r#"{"type":"turn_context","payload":{"model":"gpt-6.1"}}"#
+            "\n{{\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-6.1\"}}}}"
         )
         .unwrap();
         drop(file);
@@ -413,33 +440,4 @@ mod tests {
                 .is_none()
         );
     }
-}
-
-fn codex_tokens(path: &Path, now: DateTime<Utc>) -> Option<u64> {
-    let metadata = JsonlScanner::read_codex_session_metadata(path).ok()?;
-    // Child rollouts can include inherited counters. Without the parent baseline
-    // they cannot be labelled as this session's own usage.
-    if metadata.lineage.uses_parent_baseline() {
-        return None;
-    }
-    let range = CostUsageDayRange::new(NaiveDate::from_ymd_opt(1970, 1, 1)?, now.date_naive());
-    let parsed = JsonlScanner::parse_codex_file_with_state_bounded(
-        path,
-        &range,
-        0,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(MAX_TRANSCRIPT_BYTES as i64),
-    )
-    .ok()?;
-    if !parsed.is_complete || parsed.records.is_empty() {
-        return None;
-    }
-    parsed.records.iter().try_fold(0_u64, |sum, (record, _)| {
-        sum.checked_add(u64::try_from(record.input).ok()?)?
-            .checked_add(u64::try_from(record.output).ok()?)
-    })
 }

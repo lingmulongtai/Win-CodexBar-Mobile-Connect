@@ -162,13 +162,13 @@ mod windows {
                 usage = (None, None);
                 usage_refreshed = None;
             } else {
-                if usage_task.as_ref().is_some_and(|task| task.is_finished()) {
-                    if let Some(task) = usage_task.take() {
-                        let completed = task.await.unwrap_or((None, None));
-                        if usage_task_valid {
-                            usage = completed;
-                            usage_refreshed = Some(Instant::now());
-                        }
+                if usage_task.as_ref().is_some_and(|task| task.is_finished())
+                    && let Some(task) = usage_task.take()
+                {
+                    let completed = task.await.unwrap_or((None, None));
+                    if usage_task_valid {
+                        usage = completed;
+                        usage_refreshed = Some(Instant::now());
                     }
                 }
                 if usage_task.is_none()
@@ -200,7 +200,7 @@ mod windows {
             use codexbar::agent_sessions::AgentSessionProvider::{Claude, Codex};
             // On a fresh start with only one usable history, identify it
             // instead of silently hiding its calendar totals.
-            let selected = provider.or(last_provider).or_else(|| match usage {
+            let selected = provider.or(last_provider).or(match usage {
                 (Some(_), None) => Some(Codex),
                 (None, Some(_)) => Some(Claude),
                 _ => None,
