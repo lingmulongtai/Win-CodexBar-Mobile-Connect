@@ -628,6 +628,8 @@ export interface UsageSpendSummary {
   reportingPeriod: string;
   reportingDay: string;
   dashboardTimezone: string;
+  /** UTC time the displayed snapshot was produced. */
+  updatedAt?: string | null;
   /** False when "Track costs" is off: nothing was scanned and the summary is empty. */
   costTrackingEnabled?: boolean;
   /** The last year of per-day tokens per local-log row, independent of the period. */

@@ -116,7 +116,7 @@ export function UsageSpendProviderGroups({ groups, caption, t, showHeading = tru
 /** Windows detail kept from the old provider table: the fixed 7 and 30 day values and the source. */
 function RowDetail({ row, t }: { row: NonNullable<SpendProviderGroup["row"]>; t: (key: LocaleKey) => string }) {
   const tokens = t("UsageSpendTokens");
-  const known = t("UsageSpendKnownSubtotal");
+  const known = t(row.providerId === "codex" ? "UsageSpendEstimatedSubtotal" : "UsageSpendKnownSubtotal");
   const currency = row.currency || "USD";
   const sevenDay = formatSpendMetric(row.sevenDay, row.sevenDayTokens, currency, tokens, row.sevenDayEstimate?.knownSubtotalUsd, known, row.sevenDayTokensLowerBound);
   const thirtyDay = formatSpendMetric(row.thirtyDay, row.thirtyDayTokens, currency, tokens, row.thirtyDayEstimate?.knownSubtotalUsd, known, row.thirtyDayTokensLowerBound);
