@@ -359,6 +359,9 @@ pub async fn codex_account_reauthenticate(
         let mut state = state.lock().map_err(|e| e.to_string())?;
         invalidate_account_usage(&mut state, ProviderId::Codex)
     };
+    crate::discord_presence::settings_changed(
+        codexbar::settings::Settings::load().discord_presence_enabled,
+    );
     events::emit_provider_updated(&app, &pending);
 
     let refresh_app = app.clone();
@@ -430,6 +433,9 @@ pub async fn codex_account_switch(
         let mut state = state.lock().map_err(|e| e.to_string())?;
         invalidate_account_usage(&mut state, ProviderId::Codex)
     };
+    crate::discord_presence::settings_changed(
+        codexbar::settings::Settings::load().discord_presence_enabled,
+    );
     events::emit_provider_updated(&app, &pending);
     persist_materialized_account(result.materialized_account.as_ref());
 

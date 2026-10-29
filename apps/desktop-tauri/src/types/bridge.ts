@@ -248,10 +248,14 @@ export interface DiscordPresenceOptions {
   showToday: boolean;
   showWeek: boolean;
   showMonth: boolean;
+  showCodexLifetime: boolean;
   showGithub: boolean;
   githubUrl: string;
   showEmoji: boolean;
   imageUrl: string;
+  petUrl: string;
+  petIdleMotion: string;
+  petActiveMotion: string;
 }
 
 export interface SettingsSnapshot {

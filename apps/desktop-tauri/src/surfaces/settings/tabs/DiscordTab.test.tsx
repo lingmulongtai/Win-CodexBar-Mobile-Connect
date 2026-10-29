@@ -16,6 +16,16 @@ describe("DiscordTab", () => {
       details: "⚡ Claude Code · claude-sonnet", state: "📊 D 12k", buttons: [{ label: "View on GitHub", url: "https://github.com/example/project" }],
     } });
   });
+  it("lets the user opt in to sharing the Codex account lifetime", async () => {
+    const set = vi.fn();
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
+    const toggle = screen.getByRole("checkbox", { name: "DiscordShowCodexLifetime" });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { showCodexLifetime: true } });
+  });
+
   it("starts disabled and saves an explicit opt-in", async () => {
     const set = vi.fn();
     render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
@@ -57,8 +67,19 @@ describe("DiscordTab", () => {
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "https://codex-pets.net/#/pets/astro-burn" } });
     fireEvent.blur(input);
-    await waitFor(() => expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { imageUrl: "https://codex-pets.net/assets/pets/v/123/astro-burn/poster.webp" } }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { imageUrl: "https://codex-pets.net/assets/pets/v/123/astro-burn/poster.webp", petUrl: "https://codex-pets.net/#/pets/astro-burn" } }));
     expect(resolveCodexPet).toHaveBeenCalledWith("https://codex-pets.net/#/pets/astro-burn");
+  });
+
+  it("lets users choose separate motions for idle and active work", async () => {
+    const set = vi.fn();
+    const settings = { discordPresenceOptions: { petUrl: "https://codex-pets.net/#/pets/astro-burn" } } as SettingsSnapshot;
+    render(<DiscordTab settings={settings} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
+    fireEvent.change(screen.getByRole("combobox", { name: "DiscordPetIdleMotion" }), { target: { value: "waving" } });
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { petIdleMotion: "waving" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "DiscordPetActiveMotion" }), { target: { value: "running-left" } });
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { petActiveMotion: "running-left" } });
   });
 
   it("reports a failed link without saving it", async () => {

@@ -1813,8 +1813,19 @@ DiscordShowMonth = 今月のトークン
 DiscordShowGithub = GitHub ボタン
 DiscordShowEmoji = 絵文字
 DiscordPet = ペット画像
+DiscordPetIdleMotion = 待機中の動作
+DiscordPetActiveMotion = 作業中の動作
+DiscordMotionIdle = 待機
+DiscordMotionRunning = 作業中
+DiscordMotionRight = 右へ走る
+DiscordMotionLeft = 左へ走る
+DiscordMotionWaving = 手を振る
+DiscordMotionJumping = ジャンプ
+DiscordMotionFailed = 失敗
+DiscordMotionWaiting = 待機する
+DiscordMotionReview = 確認中
 DiscordPetUrl = Codex Pets のリンク / 公開画像 URL
-DiscordPetHelp = Codex Pets の共有リンクを貼り付けると静止画像を使用します。公開 GIF などの画像 URL も使えます。プレビューと Discord が画像の提供元にアクセスします。空欄なら付属の動くペットを使用します。
+DiscordPetHelp = Codex Pets のリンクから動く画像を生成します。ペット名は公開 Vercel サービスと Codex Pets に送信され、Discord が画像を取得します。公開画像 URL も使用できます。
 DiscordPreviewHelp = Discord が受理した内容です。通常約20秒ごとに更新し、日・週・月の集計は約5分間隔です。ボタンは自分の Discord プロフィールには表示されず、他の人に表示されます。画面によってレイアウトは異なります。
 DiscordPetInvalid = リンクを確認してください。Codex Pets のペットを取得できなかったか、HTTPS URL が正しくありません。
 DiscordPetLoading = ペットを取得しています…
@@ -1845,3 +1856,5 @@ CodexAccountUsageUnavailable = Codex アカウントの累計を取得できま�
 
 UsageSpendDiagnostics = 診断ログ
 UsageSpendDiagnosticsRefresh = ログを更新
+
+DiscordShowCodexLifetime = Codex アカウントの累計トークンを公開
