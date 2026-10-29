@@ -94,12 +94,10 @@ impl CodexPendingScanContext {
         cache: &CostUsageCache,
         range: &CostUsageDayRange,
         sessions_dirs: &[PathBuf],
-        is_app_driven: bool,
     ) -> Self {
         let root_paths = codex_scan_root_keys(sessions_dirs);
         let timezone = crate::cost_reporting_period::cost_bucket_zone().identifier();
-        let is_compatible = !is_app_driven
-            && cache.codex_scan_incomplete
+        let is_compatible = cache.codex_scan_incomplete
             && codex_pending_scan_context_is_compatible(
                 cache,
                 &range.scan_until_key,
