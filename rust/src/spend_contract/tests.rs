@@ -204,6 +204,42 @@ fn unpriced_routing_usage_is_not_reported_as_free() {
 }
 
 #[test]
+fn totals_only_contract_matches_full_contract_without_loading_details() {
+    let mut summary = CostSummary {
+        input_tokens: 100,
+        output_tokens: 20,
+        history_coverage_established: true,
+        ..CostSummary::default()
+    };
+    summary.by_model.insert("example-model".to_string(), 2.5);
+    summary.by_model_tokens.insert(
+        "example-model".to_string(),
+        ModelTokenCounts {
+            input_tokens: 100,
+            output_tokens: 20,
+            ..ModelTokenCounts::default()
+        },
+    );
+    let full = build_local_spend_contract_from_summary(
+        "test-provider",
+        7,
+        false,
+        false,
+        false,
+        summary.clone(),
+    );
+    let totals =
+        build_local_spend_totals_from_summary("test-provider", 7, false, false, false, summary);
+    assert_eq!(totals.known_cost_usd, full.known_cost_usd);
+    assert_eq!(totals.token_total, full.token_total);
+    assert_eq!(totals.price_coverage, full.price_coverage);
+    assert_eq!(totals.imports.len(), full.imports.len());
+    assert!(totals.daily.is_empty());
+    assert!(totals.projects.is_empty());
+    assert!(totals.conversations.is_empty());
+}
+
+#[test]
 fn local_spend_contract_exposes_reasoning_tokens_and_preserves_unknown() {
     let known_summary = CostSummary {
         reasoning_tokens: Some(7),

@@ -9,6 +9,7 @@ use codexbar::cost_scanner::{
 use codexbar::spend_contract::{
     SpendContract, build_contract_from_period_summary, build_local_spend_contract,
     build_local_spend_contract_for_period, build_local_spend_contract_from_summary,
+    build_local_spend_totals_from_summary,
 };
 use codexbar::spend_trend::SpendTrend;
 use serde::Serialize;
@@ -566,7 +567,7 @@ fn build_usage_spend_summary(
         })
         .flatten();
 
-    let codex_7_contract = build_local_spend_contract_from_summary(
+    let codex_7_contract = build_local_spend_totals_from_summary(
         "codex",
         7,
         include_opencodex,
@@ -574,7 +575,7 @@ fn build_usage_spend_summary(
         settings.hide_personal_info,
         codex_7_summary.clone(),
     );
-    let codex_30_contract = build_local_spend_contract_from_summary(
+    let codex_30_contract = build_local_spend_totals_from_summary(
         "codex",
         30,
         include_opencodex,
