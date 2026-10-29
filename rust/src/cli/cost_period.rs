@@ -70,7 +70,7 @@ pub(crate) fn cost_totals_json(provider: &str, summary: &CostSummary) -> Value {
         "cachedTokens": summary.cached_tokens,
         "reasoningTokens": summary.reasoning_tokens,
         "totalTokens": summary.total_tokens_for_provider(provider),
-        "totalCost": summary.total_cost_usd,
+        "totalCost": summary.published_cost_usd(provider),
     })
 }
 
@@ -171,6 +171,7 @@ mod tests {
     fn totals_sum_tokens_and_keep_unknown_distinct_from_zero() {
         let summary = CostSummary {
             total_cost_usd: 1.5,
+            history_coverage_established: true,
             input_tokens: 100,
             output_tokens: 20,
             cached_tokens: 7,
@@ -188,6 +189,7 @@ mod tests {
         assert!(cost_totals_json("codex", &CostSummary::default()).is_null());
         let known_zero = CostSummary {
             known_zero: true,
+            history_coverage_established: true,
             ..CostSummary::default()
         };
         assert_eq!(cost_totals_json("codex", &known_zero)["totalCost"], 0.0);

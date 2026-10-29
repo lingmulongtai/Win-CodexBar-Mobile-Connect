@@ -35,9 +35,7 @@ impl CodexHostCostWindow {
         let complete = summary.history_coverage_established;
         let total_tokens =
             complete.then_some(summary.input_tokens.saturating_add(summary.output_tokens));
-        let cost_usd = complete
-            .then_some(summary.total_cost_usd)
-            .filter(|cost| cost.is_finite() && *cost >= 0.0);
+        let cost_usd = summary.published_cost_usd("codex");
 
         Self {
             total_tokens,

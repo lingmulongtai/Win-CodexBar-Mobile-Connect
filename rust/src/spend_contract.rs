@@ -651,15 +651,9 @@ fn load_native_spend(
                 snapshot.redact_for_privacy();
             }
             let activity = activity_from_sessions(&snapshot.sessions);
-            let daily = snapshot
-                .daily
-                .iter()
-                .map(|point| SpendDailyPoint {
-                    day: point.day.clone(),
-                    cost_usd: point.estimated_cost_usd,
-                    total_tokens: Some(point.total_tokens),
-                })
-                .collect();
+            // The scanner checks source completeness and pricing evidence; the
+            // workspace index cannot establish fork and priority coverage.
+            let daily = daily_points(provider_id, history_days);
             NativeSpendData {
                 projects: snapshot.projects,
                 conversations: snapshot.sessions,

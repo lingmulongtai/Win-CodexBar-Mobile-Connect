@@ -247,7 +247,7 @@ async fn collect_costs(pi_selected: bool) -> HashMap<String, RawCostPayload> {
             "codex".to_string(),
             RawCostPayload {
                 today_usd: today_of("codex"),
-                last_30_days_usd: Some(codex.total_cost_usd),
+                last_30_days_usd: codex.published_cost_usd("codex"),
             },
         );
         costs.insert(
