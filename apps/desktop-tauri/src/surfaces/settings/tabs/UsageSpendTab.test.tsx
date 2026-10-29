@@ -153,6 +153,22 @@ describe("UsageSpendTab", () => {
     expect(screen.queryByText(/111/)).not.toBeInTheDocument();
   });
 
+  it("includes verified partial model costs in the labeled spend total", async () => {
+    const value = summary("month-to-date");
+    value.rows[0].periodCost = 5;
+    value.contract.knownCostUsd = 5;
+    value.contract.priceCoverage.unpriced = 1;
+    value.contract.models = [
+      { ...value.contract.models[0], model: "complete", costUsd: 5 },
+      { ...value.contract.models[0], model: "partial", costUsd: null, partialCostUsd: 10 },
+    ];
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(value);
+    renderTab();
+    await screen.findByText("partial");
+    expect(stat("Estimated spend")).toContain("$18.50");
+    expect(stat("Estimated spend")).toContain("UsageSpendPartialCost");
+  });
+
   it("opens the redacted diagnostic log on request", async () => {
     renderTab();
     fireEvent.click(screen.getByText("UsageSpendDiagnostics"));
@@ -232,6 +248,44 @@ describe("UsageSpendTab", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the previous period visible while a new period loads and restores a cached period", async () => {
+    let finish90!: (value: UsageSpendSummary) => void;
+    const pending90 = new Promise<UsageSpendSummary>((resolve) => { finish90 = resolve; });
+    tauriMocks.getUsageSpendSummary.mockImplementation((options?: { period?: string }) =>
+      options?.period === "rolling:90" ? pending90 : Promise.resolve({ ...summary(options?.period ?? "rolling:30"), contract: { ...contract("rolling:30"), models: [{ ...contract("rolling:30").models[0], model: "previous-model" }] } }));
+    const set = vi.fn();
+    const props = { settings: { spendDashboardPeriod: "rolling:30" } as SettingsSnapshot, set, saving: false };
+    const { rerender } = render(<UsageSpendTab {...props} />);
+    await screen.findByText("previous-model");
+    rerender(<UsageSpendTab {...props} settings={{ ...props.settings, spendDashboardPeriod: "rolling:90" }} />);
+    expect(screen.getByText("previous-model")).toBeInTheDocument();
+    expect(screen.getByText("UsageSpendPreviousPeriod")).toBeInTheDocument();
+    const next = summary("rolling:90");
+    next.contract.models[0].model = "next-model";
+    await act(async () => finish90(next));
+    await screen.findByText("next-model");
+    rerender(<UsageSpendTab {...props} />);
+    expect(await screen.findByText("previous-model")).toBeInTheDocument();
+  });
+
+  it("does not replace an earlier complete period with an in-progress partial result", async () => {
+    tauriMocks.getUsageSpendSummary.mockImplementation(async (options?: { period?: string }) => {
+      const result = summary(options?.period ?? "rolling:30");
+      result.updatedAt = "2026-10-01T12:00:00Z";
+      result.contract.models[0].model = "previous-model";
+      if (options?.period === "rolling:90") result.rows[0].refreshing = true;
+      return result;
+    });
+    const props = { settings: { spendDashboardPeriod: "rolling:30" } as SettingsSnapshot, set: vi.fn(), saving: false };
+    const { rerender } = render(<UsageSpendTab {...props} />);
+    await screen.findByText("previous-model");
+    expect(screen.getByText(/UsageSpendLastUpdated/)).toBeInTheDocument();
+    rerender(<UsageSpendTab {...props} settings={{ ...props.settings, spendDashboardPeriod: "rolling:90" }} />);
+    await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledWith({ period: "rolling:90", forceRefresh: false }));
+    expect(screen.getByText("previous-model")).toBeInTheDocument();
+    expect(screen.getByText("UsageSpendPreviousPeriod")).toBeInTheDocument();
   });
 
   it("scans the dashboard period, not the menu History window, and saves a new segment", async () => {
