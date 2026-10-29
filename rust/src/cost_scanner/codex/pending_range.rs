@@ -44,6 +44,7 @@ impl CodexPendingScanDisposition {
         cancelled: bool,
         has_pruned_paths: bool,
         bytes_read: i64,
+        completed_file: bool,
     ) -> Self {
         if !cache.codex_scan_incomplete {
             Self::Complete
@@ -53,7 +54,9 @@ impl CodexPendingScanDisposition {
             Self::SourceUnavailable
         } else if codex_only_unresolved_forks_pending(cache) {
             Self::UnresolvedForks
-        } else if has_pruned_paths || (bytes_read == 0 && !cache.codex_pending_paths.is_empty()) {
+        } else if has_pruned_paths
+            || (bytes_read == 0 && !completed_file && !cache.codex_pending_paths.is_empty())
+        {
             Self::NoProgress
         } else {
             Self::Pending
@@ -115,8 +118,10 @@ impl CodexPendingScanContext {
 
         Self {
             scan_range: CostUsageDayRange {
-                since_key: range.since_key.clone(),
-                until_key: range.until_key.clone(),
+                // Parse the entire retained catch-up window even when the
+                // current caller requested a narrower report.
+                since_key: scan_since_key.clone(),
+                until_key: range.scan_until_key.clone(),
                 scan_since_key,
                 scan_until_key: range.scan_until_key.clone(),
             },
@@ -125,6 +130,23 @@ impl CodexPendingScanContext {
             timezone,
         }
     }
+}
+
+/// File-level catch-up progress is reusable only for a range actually parsed
+/// for that file. The caller first binds the pending context to current roots,
+/// timezone and end date before consulting these entries.
+pub(super) fn codex_cache_covers_file(
+    cache: &CostUsageCache,
+    path: &str,
+    range: &CostUsageDayRange,
+) -> bool {
+    if let Some((since, until)) = cache.codex_pending_file_ranges.get(path) {
+        return since <= &range.since_key && until >= &range.until_key;
+    }
+    // While catch-up is pending the global range may have been advanced for
+    // live display, or entries may have been replaced by narrower parses.
+    // Only explicit per-file evidence is safe in that state.
+    !cache.codex_scan_incomplete && JsonlScanner::cache_covers_range(cache, range)
 }
 
 pub(super) fn codex_only_unresolved_forks_pending(cache: &CostUsageCache) -> bool {
@@ -186,4 +208,30 @@ fn codex_pending_scan_context_is_known(cache: &CostUsageCache) -> bool {
         || cache.codex_pending_scan_until_key.is_some()
         || !cache.codex_pending_scan_root_paths.is_empty()
         || cache.codex_pending_scan_timezone.is_some()
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn completed_empty_file_is_progress_but_unconsumed_tail_is_not() {
+        let cache = CostUsageCache {
+            codex_scan_incomplete: true,
+            codex_pending_paths: vec!["still-pending".to_string()],
+            ..CostUsageCache::default()
+        };
+        assert_eq!(
+            CodexPendingScanDisposition::after_scan(&cache, true, false, false, 0, true),
+            CodexPendingScanDisposition::Pending
+        );
+        assert_eq!(
+            CodexPendingScanDisposition::after_scan(&cache, true, false, false, 0, false),
+            CodexPendingScanDisposition::NoProgress
+        );
+        assert_eq!(
+            CodexPendingScanDisposition::after_scan(&cache, true, false, true, 0, true),
+            CodexPendingScanDisposition::NoProgress
+        );
+    }
 }

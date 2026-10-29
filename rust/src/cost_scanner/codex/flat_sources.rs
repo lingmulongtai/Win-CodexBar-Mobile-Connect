@@ -322,6 +322,19 @@ fn follow_unarchived_rollouts(
 }
 
 fn move_codex_cache_path(cache: &mut CostUsageCache, from: &str, to: &str) {
+    // Relocation with an identity is verified by the caller. A legacy entry
+    // without identity can move, but must not transfer range evidence.
+    let identity_verified = cache
+        .files
+        .get(from)
+        .is_some_and(|usage| usage.codex_file_identity.is_some());
+    if let Some(range) = cache.codex_pending_file_ranges.remove(from)
+        && identity_verified
+    {
+        cache
+            .codex_pending_file_ranges
+            .insert(to.to_string(), range);
+    }
     if let Some(usage) = cache.files.remove(from) {
         cache.files.insert(to.to_string(), usage);
     }
@@ -345,6 +358,7 @@ fn move_codex_cache_path(cache: &mut CostUsageCache, from: &str, to: &str) {
 fn drop_codex_cache_path(cache: &mut CostUsageCache, path: &str) {
     cache.files.remove(path);
     cache.codex_source_rows.remove(path);
+    cache.codex_pending_file_ranges.remove(path);
     cache.codex_fork_rows.remove(path);
     cache.codex_pending_paths.retain(|pending| pending != path);
 }

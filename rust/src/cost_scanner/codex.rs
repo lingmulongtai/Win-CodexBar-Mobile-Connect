@@ -18,7 +18,8 @@ use flat_sources::{
 use fork_resume::CodexForkResume;
 use logical_target::*;
 use pending_range::{
-    CodexPendingScanContext, CodexPendingScanDisposition, codex_cache_has_validated_state,
+    CodexPendingScanContext, CodexPendingScanDisposition, codex_cache_covers_file,
+    codex_cache_has_validated_state,
 };
 use reconciliation::*;
 
@@ -188,6 +189,7 @@ struct CodexPreparedCandidate {
 struct CodexFileScanOutcome {
     bytes_read: i64,
     is_complete: bool,
+    reused_validated_prefix: bool,
 }
 
 // Serialize scans sharing a cache inside this process. Each scan reads and
@@ -532,7 +534,7 @@ impl CostScanner {
         let path_key = path.to_string_lossy().to_string();
         let file_identity = JsonlScanner::codex_file_identity(path, &metadata);
         let cached = cache.files.get(&path_key).cloned();
-        let cache_covers_range = JsonlScanner::cache_covers_range(cache, range);
+        let cache_covers_range = codex_cache_covers_file(cache, &path_key, range);
         let trace_was_pruned = cached.as_ref().is_some_and(|entry| {
             entry.size > size
                 && (entry.parsed_bytes.unwrap_or(0) > size || codex_scan_target_size(entry) > size)
@@ -544,6 +546,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: false,
+                reused_validated_prefix: false,
             };
         }
         let cache_entry_is_fresh = |entry: &CostUsageFileUsage| {
@@ -575,6 +578,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: true,
+                reused_validated_prefix: true,
             };
         }
 
@@ -718,6 +722,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: false,
+                reused_validated_prefix: false,
             };
         }
 
@@ -737,6 +742,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: 0,
                 is_complete: true,
+                reused_validated_prefix: true,
             };
         }
 
@@ -747,6 +753,7 @@ impl CostScanner {
         if !is_fork
             && !cached_identity_changed
             && let Some(entry) = &cached
+            && identity_matches_cached(entry)
         {
             let start_offset = entry.parsed_bytes.unwrap_or(0);
             let same_partial =
@@ -802,6 +809,7 @@ impl CostScanner {
                 let outcome = CodexFileScanOutcome {
                     bytes_read: parse_result.bytes_read,
                     is_complete: parse_result.is_complete,
+                    reused_validated_prefix: true,
                 };
                 cache.files.insert(
                     path_key,
@@ -951,6 +959,7 @@ impl CostScanner {
             return CodexFileScanOutcome {
                 bytes_read: parse_result.bytes_read,
                 is_complete: false,
+                reused_validated_prefix: false,
             };
         }
         // A resumed parse returns only the suffix; its prefix is the cached day
@@ -983,6 +992,7 @@ impl CostScanner {
         let outcome = CodexFileScanOutcome {
             bytes_read: parse_result.bytes_read,
             is_complete: parse_result.is_complete,
+            reused_validated_prefix: resumed,
         };
         let locally_resolved = parse_result.fork_baseline_locally_resolved;
         let codex_fork_accounting_state = if is_fork

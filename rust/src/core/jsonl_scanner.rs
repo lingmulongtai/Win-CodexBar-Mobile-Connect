@@ -241,6 +241,14 @@ pub struct CostUsageCache {
     /// Dirty/incomplete Codex rollouts deferred by the foreground work budget.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub codex_pending_paths: Vec<String>,
+    /// Per-file date ranges parsed during the current source-bound catch-up.
+    /// Global coverage must not be advanced until every candidate completes.
+    #[serde(
+        default,
+        skip_serializing_if = "HashMap::is_empty",
+        serialize_with = "save_skip::sorted_map"
+    )]
+    pub codex_pending_file_ranges: HashMap<String, (String, String)>,
     /// True while bounded Codex catch-up has not completed for this window.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub codex_scan_incomplete: bool,
