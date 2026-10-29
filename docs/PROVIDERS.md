@@ -42,6 +42,17 @@ existing pace calculation; the fixed window is not inferred as a calendar month.
 
 Auth resolution helpers in `rust/src/providers/` commonly try: explicit settings → keyring/entry → environment variables (exact order is provider-specific).
 
+### Cursor app session
+
+Automatic mode first reuses a recently validated Cursor app session, or reads
+`cursorAuth/accessToken` from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`
+without writing to the database, before falling back to browser cookies.
+Cursor may store the token in a `cursor-safe-storage:v1:` envelope; on Windows,
+Win-CodexBar decrypts it using the DPAPI-protected Chromium key in Cursor's
+`Local State`. Plain tokens do not read the key. Unreadable, oversized, or
+unknown-format entries yield no app session, so Automatic mode falls through
+to browser cookies.
+
 ### Devin manual authentication
 
 On Windows, Devin uses a manually pasted Bearer token; Chrome-session import is
