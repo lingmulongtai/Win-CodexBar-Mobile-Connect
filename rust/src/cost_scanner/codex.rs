@@ -190,6 +190,76 @@ struct CodexFileScanOutcome {
     is_complete: bool,
 }
 
+// Serialize scans sharing a cache inside this process. Each scan reads and
+// replaces a snapshot; concurrent scans would otherwise discard each other's
+// bounded catch-up progress. Separate cache roots remain independent.
+fn codex_scan_lock(cache_root: Option<&Path>) -> std::sync::Arc<std::sync::Mutex<()>> {
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    let root = cache_root
+        .map(Path::to_path_buf)
+        .or_else(JsonlScanner::default_cache_root)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Resolve the same key before and after the cache is first persisted.
+    // If creating or resolving the directory fails, serialize these uncommon
+    // scans on one fallback lock instead of inventing unstable path keys.
+    let root = if fs::create_dir_all(&root).is_ok() {
+        fs::canonicalize(&root).unwrap_or_default()
+    } else {
+        PathBuf::new()
+    };
+    #[cfg(windows)]
+    let root = PathBuf::from(root.to_string_lossy().to_lowercase());
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&root).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(root, Arc::downgrade(&lock));
+    lock
+}
+
+#[cfg(test)]
+mod scan_lock_tests {
+    use super::codex_scan_lock;
+    use std::sync::Arc;
+
+    #[test]
+    fn scans_of_the_same_cache_share_a_lock_but_other_roots_do_not() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let new_root = first.path().join("new-cache");
+        let lock = codex_scan_lock(Some(&new_root));
+        assert!(new_root.is_dir());
+        let same = codex_scan_lock(Some(&new_root.join(".")));
+        let other = codex_scan_lock(Some(second.path()));
+        assert!(Arc::ptr_eq(&lock, &same));
+        assert!(!Arc::ptr_eq(&lock, &other));
+        let _guard = lock.lock().unwrap();
+        assert!(same.try_lock().is_err());
+        assert!(other.try_lock().is_ok());
+    }
+
+    #[test]
+    fn cancelled_scan_does_not_wait_for_a_busy_cache() {
+        use super::CostScanner;
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let lock = codex_scan_lock(Some(root.path()));
+        let _guard = lock.lock().unwrap();
+        let cancelled = AtomicBool::new(true);
+        let (summary, stats) = CostScanner::new(30)
+            .with_cache_root(root.path())
+            .scan_codex_detailed(Some(&cancelled));
+        assert!(!summary.history_coverage_established);
+        assert_eq!(stats.files_parsed, 0);
+    }
+}
+
 /// Cost usage scanner
 impl CostScanner {
     pub fn scan_codex(&self) -> CostSummary {
@@ -217,6 +287,23 @@ impl CostScanner {
         &self,
         cancel: Option<&AtomicBool>,
     ) -> (CostSummary, CostScanStats, CostUsageCache) {
+        let lock = codex_scan_lock(self.cache_root.as_deref());
+        let _guard = loop {
+            match lock.try_lock() {
+                Ok(guard) => break guard,
+                Err(std::sync::TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if is_cancelled(cancel) {
+                        return (
+                            CostSummary::default(),
+                            CostScanStats::default(),
+                            CostUsageCache::default(),
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+            }
+        };
         scan::scan_codex_detailed_with_cache(self, cancel)
     }
 
