@@ -64,6 +64,9 @@ export function useSettings(initial: SettingsSnapshot): UseSettingsReturn {
   const [error, setError] = useState<string | null>(null);
   // Saves started from this window that have not answered yet.
   const pendingSaves = useRef(0);
+  const pendingDiscordSaves = useRef(0);
+  const discordWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const refreshDiscordAfterOverlap = useRef(false);
   const [anyPending, setAnyPending] = useState(false);
 
   useEffect(() => {
@@ -145,6 +148,11 @@ export function useSettings(initial: SettingsSnapshot): UseSettingsReturn {
 
   const update = useCallback(async (patch: SettingsUpdate) => {
     const request = ++latestRequest.current;
+    const discordPatch = patch.discordPresenceOptions !== undefined;
+    if ((discordPatch && pendingSaves.current > 0) || pendingDiscordSaves.current > 0) {
+      refreshDiscordAfterOverlap.current = true;
+    }
+    if (discordPatch) pendingDiscordSaves.current += 1;
     pendingSaves.current += 1;
     setAnyPending(true);
     setError(null);
@@ -153,7 +161,14 @@ export function useSettings(initial: SettingsSnapshot): UseSettingsReturn {
     // the shell answers.
     setSettings((current) => applyPatch(current, patch));
     try {
-      const next = await updateSettings(patch);
+      let next: SettingsSnapshot;
+      if (discordPatch) {
+        const write = discordWriteQueue.current.then(() => updateSettings(patch));
+        discordWriteQueue.current = write.then(() => {}, () => {});
+        next = await write;
+      } else {
+        next = await updateSettings(patch);
+      }
       if (request !== latestRequest.current) return;
       setSettings(next);
       if (typeof window !== "undefined") {
@@ -177,7 +192,23 @@ export function useSettings(initial: SettingsSnapshot): UseSettingsReturn {
       }
     } finally {
       pendingSaves.current -= 1;
-      if (pendingSaves.current === 0) setAnyPending(false);
+      if (discordPatch) pendingDiscordSaves.current -= 1;
+      if (pendingSaves.current === 0) {
+        setAnyPending(false);
+        if (refreshDiscordAfterOverlap.current) {
+          refreshDiscordAfterOverlap.current = false;
+          const settledRequest = latestRequest.current;
+          try {
+            const fresh = await getSettingsSnapshot();
+            if (pendingSaves.current === 0 && latestRequest.current === settledRequest) {
+              setSettings(fresh);
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent<SettingsSnapshot>("codexbar:settings-updated", { detail: fresh }));
+              }
+            }
+          } catch { /* A later settings event can refresh the view. */ }
+        }
+      }
     }
   }, []);
 
