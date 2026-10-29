@@ -98,6 +98,13 @@ describe("DiscordTab", () => {
     expect(screen.queryByText(/Claude Code/)).not.toBeInTheDocument();
   });
 
+  it("explains that marked calendar totals exclude deleted files", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connected", usage: "localOnly", activity: { details: "Codex", state: "📊 D~ 12k" } });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("📊 D~ 12k")).toBeInTheDocument();
+    expect(screen.getByText("DiscordUsageLocalOnly")).toBeInTheDocument();
+  });
+
   it("explains when local token data is unavailable", async () => {
     vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connected", usage: "unavailable", activity: { details: "Claude Code" } });
     render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);

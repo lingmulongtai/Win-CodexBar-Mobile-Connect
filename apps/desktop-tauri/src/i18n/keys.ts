@@ -744,6 +744,7 @@ export const ALL_LOCALE_KEYS = [
   "DiscordLiveDisabled",
   "DiscordLiveConnecting",
   "DiscordUsageAvailable",
+  "DiscordUsageLocalOnly",
   "DiscordUsagePartial",
   "DiscordUsagePartialLoading",
   "DiscordUsageLoading",

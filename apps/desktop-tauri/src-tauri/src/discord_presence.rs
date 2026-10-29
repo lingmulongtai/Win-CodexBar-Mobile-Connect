@@ -198,6 +198,12 @@ mod windows {
             && !options.show_month
         {
             "hidden"
+        } else if state.is_some_and(|text| {
+            ["D~ ", "W~ ", "M~ "]
+                .iter()
+                .any(|label| text.contains(label))
+        }) {
+            "localOnly"
         } else if state.is_some() {
             if missing_session || missing_periods {
                 if collecting && missing_periods {
@@ -226,6 +232,7 @@ mod windows {
         let mut usage_refreshed: [Option<Instant>; 2] = [None, None];
         let mut usage_failures = [0_u8; 2];
         let mut usage_day = None;
+        let mut usage_context = None;
         let mut usage_task_valid = [false; 2];
         let metadata_slot = Arc::new(tokio::sync::Semaphore::new(1));
         loop {
@@ -235,6 +242,7 @@ mod windows {
                 usage_refreshed = [None, None];
                 usage_failures = [0; 2];
                 usage_day = None;
+                usage_context = None;
                 if let Some(mut current) = stream.take() {
                     let _result = set_activity(&mut current, None).await;
                 }
@@ -263,14 +271,21 @@ mod windows {
             let settings = codexbar::settings::Settings::load();
             let tokens_enabled = settings.cost_usage_enabled;
             let options = settings.discord_presence_options;
-            let today = codexbar::cost_reporting_period::cost_bucket_zone().date(now);
-            if usage_day.is_some_and(|day| day != today) {
+            let zone = codexbar::cost_reporting_period::cost_bucket_zone();
+            let today = zone.date(now);
+            let context = (zone.identifier(), settings.codex_custom_sessions_dirs);
+            if usage_day.is_some_and(|day| day != today)
+                || usage_context
+                    .as_ref()
+                    .is_some_and(|previous| previous != &context)
+            {
                 usage_task_valid = [false; 2];
                 usage = [None, None];
                 usage_refreshed = [None, None];
                 usage_failures = [0; 2];
             }
             usage_day = Some(today);
+            usage_context = Some(context);
             if !tokens_enabled {
                 usage_task_valid = [false; 2];
                 usage = [None, None];
@@ -346,6 +361,7 @@ mod windows {
                         today: a.today.checked_add(b.today)?,
                         week: a.week.checked_add(b.week)?,
                         month: a.month.checked_add(b.month)?,
+                        local_files_only: a.local_files_only || b.local_files_only,
                     })
                 }),
                 _ => None,
@@ -443,6 +459,11 @@ mod windows {
             assert_eq!(
                 usage_status(&all, &options, true, true, true, false),
                 "available"
+            );
+            let local = json!({"state": "📊 S 20 · D~ 10 · W~ 20 · M~ 30"});
+            assert_eq!(
+                usage_status(&local, &options, true, true, true, false),
+                "localOnly"
             );
         }
 
