@@ -41,7 +41,9 @@ mod claude_roots;
 mod claude_usage;
 mod codex;
 use codex::codex_daily_request_prices;
-pub(crate) use codex::{codex_request_price_supported, reprice_codex_from_source_rows};
+pub(crate) use codex::{
+    codex_request_price_supported_with_snapshot, reprice_codex_from_source_rows,
+};
 mod hourly;
 mod read_receipt;
 mod stats;

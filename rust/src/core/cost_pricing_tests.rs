@@ -803,3 +803,27 @@ fn gpt54_and_gpt55_bill_the_whole_request_at_long_context_rates_above_272k() {
     assert!(CostUsagePricing::codex_fast_cost_usd("gpt-5.5-priority", 272_001, 0, 1).is_none());
     assert!(CostUsagePricing::codex_fast_cost_usd("gpt-5.4-fast", 272_000, 0, 1).is_some());
 }
+
+#[test]
+fn codex_bulk_snapshot_prices_dynamic_tiers_and_preserves_bundled_rules() {
+    let snapshot = crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests(
+        r#"{"openai":{"models":{"gpt-test-model":{"id":"gpt-test-model","cost":{"input":2,"output":8,"cache_read":0.5,"context_over_200k":{"input":4,"output":16,"cache_read":1}}}}}}"#,
+    ).unwrap();
+    let price = |model, input, cached, output, day| {
+        CostUsagePricing::codex_day_aggregate_cost_usd_with_snapshot(
+            model, input, cached, output, day, &snapshot,
+        )
+    };
+    assert!((price("gpt-test-model", 100_000, 50_000, 1_000, None).unwrap() - 0.133).abs() < 1e-9);
+    assert!((price("gpt-test-model", 300_000, 100_000, 1_000, None).unwrap() - 0.916).abs() < 1e-9);
+    assert_eq!(price("definitely-unknown-model", 100, 0, 10, None), None);
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 12);
+    for model in ["gpt-6-astra", "gpt-6-astra-priority", "gpt-5.6-sol"] {
+        for input in [100_000, 300_000] {
+            assert_eq!(
+                price(model, input, 20_000, 1000, day),
+                CostUsagePricing::codex_day_aggregate_cost_usd(model, input, 20_000, 1000, day)
+            );
+        }
+    }
+}

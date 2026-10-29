@@ -241,6 +241,39 @@ impl CostUsagePricing {
             .or_else(|| Self::codex_cost_usd(model, input, cached, output))
     }
 
+    /// Like `codex_day_aggregate_cost_usd`, using one catalog view for bulk scans.
+    pub fn codex_day_aggregate_cost_usd_with_snapshot(
+        model: &str,
+        input: u64,
+        cached: u64,
+        output: u64,
+        pricing_date: Option<NaiveDate>,
+        snapshot: &models_dev_pricing::ModelsDevPricingSnapshot,
+    ) -> Option<f64> {
+        Self::codex_fast_aggregate_cost_usd(model, input, cached, output, pricing_date)
+            .or_else(|| {
+                pricing_date.and_then(|date| {
+                    Self::codex_cost_usd_at_date_with_pricing_snapshot(
+                        model,
+                        input,
+                        cached,
+                        output,
+                        date,
+                        Some(snapshot),
+                    )
+                })
+            })
+            .or_else(|| {
+                Self::codex_cost_usd_with_pricing_snapshot(
+                    model,
+                    input,
+                    cached,
+                    output,
+                    Some(snapshot),
+                )
+            })
+    }
+
     /// Short-context `(input, cache read, output)` rates of `model` on
     /// `pricing_date`. Short-context pricing is linear per token, so
     /// one-token probes read the exact dated rates back.

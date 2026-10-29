@@ -228,8 +228,9 @@ impl CodexWorkspacesIndex {
         let mut indexed = 0u32;
         let mut skipped = 0u32;
 
+        let pricing_snapshot = crate::core::pricing_snapshot();
         for (idx, path) in files.iter().enumerate() {
-            match index_one_file(path, &range) {
+            match index_one_file_with_snapshot(path, &range, &pricing_snapshot) {
                 Some(parsed) => {
                     merge_daily(&mut daily_acc, &parsed.day_models, &parsed.day_costs);
                     let turns = scan_session_turns(path, &parsed.session_id, &range);
@@ -501,7 +502,16 @@ fn build_projects(sessions: &HashMap<String, SessionBucket>) -> Vec<ProjectUsage
         .collect()
 }
 
+#[cfg(test)]
 fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> {
+    index_one_file_with_snapshot(path, range, &crate::core::pricing_snapshot())
+}
+
+fn index_one_file_with_snapshot(
+    path: &Path,
+    range: &CostUsageDayRange,
+    snapshot: &crate::core::ModelsDevPricingSnapshot,
+) -> Option<ParsedFile> {
     let first_line = CodexRolloutFirstLineParser::read_first_line(path)?;
     let meta = CodexRolloutFirstLineParser::parse(&first_line);
     let (session_id, cwd) = if let Some(meta) = meta {
@@ -553,9 +563,23 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         day_entry.2 = day_entry.2.saturating_add(output);
 
         let daily = day_costs.entry(record.day_key.clone()).or_default();
-        let price = crate::cost_scanner::codex_request_price_supported(path, &record, &model)
-            .then(|| codex_cost_on_day(&record.day_key, &model, input, cached, output))
-            .flatten();
+        let price = crate::cost_scanner::codex_request_price_supported_with_snapshot(
+            path,
+            &record,
+            &model,
+            Some(snapshot),
+        )
+        .then(|| {
+            codex_cost_on_day_with_snapshot(
+                &record.day_key,
+                &model,
+                input,
+                cached,
+                output,
+                snapshot,
+            )
+        })
+        .flatten();
         match price {
             Some(usd) => {
                 cost.known_usd += usd;
@@ -635,10 +659,42 @@ fn merge_daily(
 
 /// Prices at the usage day's rates, like the cost scanners, so usage from
 /// before a model's repricing keeps the rates it was billed at.
+#[cfg(test)]
 fn codex_cost_on_day(day: &str, model: &str, input: u64, cached: u64, output: u64) -> Option<f64> {
+    codex_cost_on_day_with_snapshot(
+        day,
+        model,
+        input,
+        cached,
+        output,
+        &crate::core::pricing_snapshot(),
+    )
+}
+
+fn codex_cost_on_day_with_snapshot(
+    day: &str,
+    model: &str,
+    input: u64,
+    cached: u64,
+    output: u64,
+    snapshot: &crate::core::ModelsDevPricingSnapshot,
+) -> Option<f64> {
     match CostUsageDayRange::parse_day_key(day) {
-        Some(day) => CostUsagePricing::codex_cost_usd_at_date(model, input, cached, output, day),
-        None => CostUsagePricing::codex_cost_usd(model, input, cached, output),
+        Some(day) => CostUsagePricing::codex_cost_usd_at_date_with_pricing_snapshot(
+            model,
+            input,
+            cached,
+            output,
+            day,
+            Some(snapshot),
+        ),
+        None => CostUsagePricing::codex_cost_usd_with_pricing_snapshot(
+            model,
+            input,
+            cached,
+            output,
+            Some(snapshot),
+        ),
     }
 }
 
@@ -1331,5 +1387,34 @@ mod tests {
         let unnamed = index.load_snapshot(false, |_| {}).unwrap();
         assert_eq!(unnamed.projects[0].display_name, "proj-a");
         assert_eq!(unnamed.total, fresh.total);
+    }
+    #[test]
+    fn workspace_prices_dynamic_models_from_snapshot_and_keeps_unknown_unpriced() {
+        let catalog = crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests(
+            r#"{"openai":{"models":{"gpt-example":{"id":"gpt-example","cost":{"input":2,"output":8,"cache_read":0.5}}}}}"#,
+        ).unwrap();
+        let empty =
+            crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests("{}").unwrap();
+        let cost = codex_cost_on_day_with_snapshot(
+            "2026-10-12",
+            "gpt-example",
+            100_000,
+            50_000,
+            1_000,
+            &catalog,
+        )
+        .unwrap();
+        assert!((cost - 0.133).abs() < 1e-9);
+        assert_eq!(
+            codex_cost_on_day_with_snapshot(
+                "2026-10-12",
+                "gpt-example",
+                100_000,
+                50_000,
+                1_000,
+                &empty
+            ),
+            None
+        );
     }
 }
