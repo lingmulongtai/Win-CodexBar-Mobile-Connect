@@ -255,17 +255,16 @@ pub(super) fn read(
             metadata_tail(&mut file, size, METADATA_SEARCH_BYTES, |value| {
                 model_record(value, provider)
             })
+            && tail.ends_with(b"\n")
         {
-            if tail.ends_with(b"\n") {
-                let complete = if !partial_first {
-                    tail.as_slice()
-                } else {
-                    tail.iter()
-                        .position(|b| *b == b'\n')
-                        .map_or(&[][..], |i| &tail[i + 1..])
-                };
-                scan_lines(&mut result, complete, provider, now, false);
-            }
+            let complete = if !partial_first {
+                tail.as_slice()
+            } else {
+                tail.iter()
+                    .position(|b| *b == b'\n')
+                    .map_or(&[][..], |i| &tail[i + 1..])
+            };
+            scan_lines(&mut result, complete, provider, now, false);
         }
     }
     result.tokens = if !tokens_enabled {

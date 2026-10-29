@@ -7,10 +7,10 @@ pub(super) fn paused_codex_summary(
     range: &CostUsageDayRange,
     compatible_context: bool,
 ) -> CostSummary {
-    if compatible_context {
-        if let Some(summary) = codex_current_window_summary(cache, range, start_date, today) {
-            return summary;
-        }
+    if compatible_context
+        && let Some(summary) = codex_current_window_summary(cache, range, start_date, today)
+    {
+        return summary;
     }
 
     // Without a retained report, rebuild one for the requested days only; the
