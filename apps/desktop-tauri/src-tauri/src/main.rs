@@ -421,6 +421,7 @@ fn main() {
             auto_refresh::install(app.handle().clone());
             stay_awake::install(app.handle().clone());
             discord_presence::install(settings.discord_presence_enabled);
+            commands::install_usage_spend_background(app.handle().clone());
             mobile_bridge::install(app.handle().clone());
             desktop_peer::install(app.handle().clone());
             if settings.powertoys_status_pipe_enabled {

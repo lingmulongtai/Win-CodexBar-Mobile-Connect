@@ -121,6 +121,7 @@ async fn refresh_after_claude_change(
         let (token, snapshot) = state.claude_reconciliation.begin();
         (usage_pending, token, snapshot)
     };
+    super::invalidate_usage_spend_account_scope(&app);
     crate::events::emit_provider_updated(&app, &usage_pending);
     claude_reconciliation::emit(&app, &reconciliation_pending);
     let refresh_app = app.clone();

@@ -217,6 +217,7 @@ pub(super) fn spend_for(view: &PeerView) -> UsageSpendSummary {
         reporting_period: period,
         reporting_day: day,
         dashboard_timezone: zone,
+        updated_at: at.map(|value| value.to_rfc3339()),
         cost_tracking_enabled: spend.is_some_and(|s| s.cost_tracking_enabled),
         token_activity: vec![],
         trend: None,
