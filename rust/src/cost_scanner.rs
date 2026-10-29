@@ -40,6 +40,8 @@ mod claude_pricing;
 mod claude_roots;
 mod claude_usage;
 mod codex;
+use codex::codex_daily_request_prices;
+pub(crate) use codex::{codex_request_price_supported, reprice_codex_from_source_rows};
 mod hourly;
 mod read_receipt;
 mod stats;
@@ -89,6 +91,8 @@ impl ModelPricingCompleteness {
 /// Cost summary from scanning local logs
 #[derive(Debug, Clone, Default)]
 pub struct CostSummary {
+    /// Included sessions recovered from an approved local backup.
+    pub restored_sessions: u32,
     /// Total cost in USD for the period
     pub total_cost_usd: f64,
     /// Total input tokens
@@ -179,6 +183,18 @@ pub fn cache_is_separate_from_input(provider: &str) -> bool {
 }
 
 impl CostSummary {
+    /// Complete cost only; incomplete Codex request/history coverage is a
+    /// subtotal and must not be presented as the total.
+    pub fn published_cost_usd(&self, provider: &str) -> Option<f64> {
+        if provider == "codex"
+            && (!self.history_coverage_established || self.model_pricing_completeness.is_partial())
+        {
+            return None;
+        }
+        (self.total_cost_usd.is_finite() && self.total_cost_usd >= 0.0)
+            .then_some(self.total_cost_usd)
+    }
+
     pub fn format_total(&self) -> String {
         format!("${:.2}", self.total_cost_usd)
     }
@@ -1513,19 +1529,14 @@ fn daily_cost_history(
                     }
                 }
             }
-            for (day_key, models) in &cache.days {
-                let Some(slot) = daily_costs.get_mut(day_key) else {
-                    continue;
-                };
-                let Some(day) = CostUsageDayRange::parse_day_key(day_key) else {
-                    continue;
-                };
-                let day_range = CostUsageDayRange::new(day, day);
-                let mut one_day = HashMap::new();
-                one_day.insert(day_key.clone(), models.clone());
-                let mut scratch = CostSummary::default();
-                let (cost, _) = add_codex_days_map_to_summary(&mut scratch, &one_day, &day_range);
-                *slot = (!scratch.model_pricing_completeness.is_partial()).then_some(cost);
+            let range = CostUsageDayRange::new(
+                today - Duration::days(i64::from(days.saturating_sub(1))),
+                today,
+            );
+            for (day_key, cost) in codex_daily_request_prices(&cache, &range) {
+                if let Some(slot) = daily_costs.get_mut(&day_key) {
+                    *slot = cost;
+                }
             }
         }
         "claude" => {
@@ -1652,6 +1663,7 @@ fn isolated_presence_cache_root(base: &Path, roots: &[PathBuf], zone: &str) -> O
         return None;
     }
     let mut digest = Sha256::new();
+    digest.update(b"request-pricing-v1\0");
     digest.update(zone.as_bytes());
     digest.update([0]);
     let mut seen = HashSet::new();

@@ -24,7 +24,12 @@ impl CodexPendingScanDisposition {
         if is_app_driven || !cache.codex_scan_incomplete {
             return Self::Proceed;
         }
-        if cache.codex_scan_pause_reason.is_none() {
+        if cache.codex_scan_pause_reason.is_none()
+            || cache
+                .codex_pause_observation
+                .as_ref()
+                .is_some_and(|old| *old != pause_observation(cache))
+        {
             return Self::Proceed;
         }
         if matches!(
@@ -54,8 +59,9 @@ impl CodexPendingScanDisposition {
             Self::SourceUnavailable
         } else if codex_only_unresolved_forks_pending(cache) {
             Self::UnresolvedForks
-        } else if has_pruned_paths
-            || (bytes_read == 0 && !completed_file && !cache.codex_pending_paths.is_empty())
+        } else if bytes_read == 0
+            && !completed_file
+            && (has_pruned_paths || !cache.codex_pending_paths.is_empty())
         {
             Self::NoProgress
         } else {
@@ -116,6 +122,13 @@ impl CodexPendingScanContext {
             range.scan_since_key.clone()
         };
 
+        let scan_since_key = cache
+            .scan_since_key
+            .as_ref()
+            .filter(|_| !is_incompatible)
+            .map_or(scan_since_key.clone(), |old| {
+                old.min(&scan_since_key).clone()
+            });
         Self {
             scan_range: CostUsageDayRange {
                 // Parse the entire retained catch-up window even when the
@@ -231,7 +244,64 @@ mod progress_tests {
         );
         assert_eq!(
             CodexPendingScanDisposition::after_scan(&cache, true, false, true, 0, true),
-            CodexPendingScanDisposition::NoProgress
+            CodexPendingScanDisposition::Pending
+        );
+    }
+}
+
+/// Observe only metadata while paused. An unchanged partial tail is not retried.
+pub(super) fn pause_observation(cache: &CostUsageCache) -> String {
+    let mut paths = cache.codex_pending_paths.clone();
+    paths.extend(cache.codex_pending_scan_root_paths.iter().cloned());
+    paths.sort();
+    paths.dedup();
+    let values: Vec<_> = paths
+        .into_iter()
+        .map(|path| {
+            let state = fs::metadata(&path).ok().map(|m| {
+                (
+                    m.len(),
+                    system_time_to_unix_ms(m.modified().ok()),
+                    JsonlScanner::codex_file_identity(Path::new(&path), &m),
+                )
+            });
+            let readable = cache
+                .codex_pending_scan_root_paths
+                .contains(&path)
+                .then(|| fs::read_dir(&path).is_ok());
+            (path, state, readable)
+        })
+        .collect();
+    serde_json::to_string(&values).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    #[test]
+    fn paused_tail_resumes_only_after_source_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("partial.jsonl");
+        fs::write(&path, "partial").unwrap();
+        let mut cache = CostUsageCache {
+            codex_scan_incomplete: true,
+            codex_scan_pause_reason: Some(CodexScanPauseReason::NoProgress),
+            codex_pending_paths: vec![path.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        cache.codex_pause_observation = Some(pause_observation(&cache));
+        assert_eq!(
+            CodexPendingScanDisposition::before_scan(&cache, false),
+            CodexPendingScanDisposition::PreservePause
+        );
+        fs::write(&path, "completed line\n").unwrap();
+        assert_eq!(
+            CodexPendingScanDisposition::before_scan(&cache, false),
+            CodexPendingScanDisposition::Proceed
+        );
+        assert_eq!(
+            CodexPendingScanDisposition::after_scan(&cache, true, false, true, 100, false),
+            CodexPendingScanDisposition::Pending
         );
     }
 }
