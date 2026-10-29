@@ -565,10 +565,16 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         model_tokens.insert(model, 0);
     }
 
-    let token_times = [
-        parsed.first_token_timestamp.as_deref(),
-        parsed.last_token_timestamp.as_deref(),
-    ];
+    // First/last event order only represents the bounds if timestamps are
+    // monotonic. Unordered logs fall back to the day and file-time estimate.
+    let token_times = if parsed.token_timestamps_monotonic == Some(false) {
+        [None, None]
+    } else {
+        [
+            parsed.first_token_timestamp.as_deref(),
+            parsed.last_token_timestamp.as_deref(),
+        ]
+    };
     let (started_at, latest_activity) = file_activity_bounds(path, &day_models, token_times);
 
     Some(ParsedFile {
@@ -1086,6 +1092,40 @@ mod tests {
         let last = Utc.with_ymd_and_hms(2026, 3, 4, 10, 0, 3).unwrap();
         assert_eq!(parsed.started_at, Some(first));
         assert_eq!(parsed.latest_activity, Some(last));
+    }
+
+    #[test]
+    fn unordered_token_events_do_not_claim_an_incorrect_exact_end_time() {
+        let tmp = TempDir::new().unwrap();
+        let sessions = tmp.path().join("sessions");
+        write_session(
+            &sessions,
+            "2026-03-04",
+            "sess-times.jsonl",
+            &tmp.path().to_string_lossy(),
+            "gpt-5",
+            10,
+            5,
+        );
+        let path = sessions.join("2026/03/04/sess-times.jsonl");
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        for stamp in ["2026-03-04T12:00:00Z", "2026-03-04T11:00:00Z"] {
+            writeln!(file, r#"{{"timestamp":"{stamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5}}}}}}}}"#).unwrap();
+        }
+        drop(file);
+        let range = CostUsageDayRange::new(
+            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        );
+        let parsed = index_one_file(&path, &range).expect("parsed");
+        assert_eq!(
+            parsed.started_at,
+            Some(Utc.with_ymd_and_hms(2026, 3, 4, 0, 0, 0).unwrap())
+        );
+        assert_eq!(
+            parsed.latest_activity,
+            Some(Utc.with_ymd_and_hms(2026, 3, 4, 23, 59, 59).unwrap())
+        );
     }
 
     #[test]
