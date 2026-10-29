@@ -227,6 +227,7 @@ mod tests {
                 included_in_overview: true,
                 daily: Vec::new(),
                 refreshing: false,
+                history_paused: false,
                 stale_updated_at: None,
             }],
             contract: codexbar::spend_contract::SpendContract::empty(

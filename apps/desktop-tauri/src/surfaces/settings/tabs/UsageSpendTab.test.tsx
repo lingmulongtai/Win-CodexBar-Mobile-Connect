@@ -151,7 +151,7 @@ describe("UsageSpendTab", () => {
 
     await act(async () => { resolveFirst(summary("month-to-date")); });
     await screen.findByText("USD");
-    expect(screen.getByRole("button", { name: /UsageSpendRefresh/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /UsageSpendLoading/ })).toBeDisabled();
     expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
 
     act(() => { eventHandlers.get("provider-updated")?.(); eventHandlers.get("provider-updated")?.(); });
@@ -160,6 +160,50 @@ describe("UsageSpendTab", () => {
     await act(async () => { resolveSecond(summary("month-to-date")); });
     await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(3));
     expect(screen.getByRole("button", { name: /UsageSpendRefresh/ })).toBeEnabled();
+  });
+
+  it("distinguishes a paused history scan from an active refresh", async () => {
+    const value = summary("month-to-date");
+    value.rows[0].refreshing = true;
+    value.rows[0].historyPaused = true;
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(value);
+    renderTab();
+    expect(await screen.findByText(/UsageSpendPaused/)).toBeInTheDocument();
+  });
+
+  it("retries an incomplete history after a transient silent failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = summary("month-to-date");
+      pending.rows[0].refreshing = true;
+      const finished = summary("month-to-date");
+      tauriMocks.getUsageSpendSummary
+        .mockResolvedValueOnce(pending)
+        .mockRejectedValueOnce(new Error("temporary failure"))
+        .mockResolvedValueOnce(finished);
+      await act(async () => { renderTab(); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(screen.getByText("temporary failure")).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText("temporary failure")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks completed history at a low frequency", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { renderTab(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(299_999); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("scans the dashboard period, not the menu History window, and saves a new segment", async () => {

@@ -900,6 +900,8 @@ locale_keys! {
     UsageSpendRefresh,
     UsageSpendLoading,
     UsageSpendRefreshing,
+    UsageSpendPaused,
+    UsageSpendPending,
     UsageSpendEmpty,
     UsageSpendColProvider,
     UsageSpendCol7d,
