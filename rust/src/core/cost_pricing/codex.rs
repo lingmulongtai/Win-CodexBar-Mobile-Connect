@@ -150,19 +150,30 @@ pub(super) fn codex_cost_from_rates_with_cache_write(
         + (output_tokens as f64) * output_rate
 }
 
-pub(super) fn codex_fast_allows_long_context(model: &str) -> bool {
-    CostUsagePricing::codex_fast_base_model(model) == "gpt-6-astra"
+pub(super) fn codex_fast_allows_long_context(model: &str, pricing_date: Option<NaiveDate>) -> bool {
+    let base = CostUsagePricing::codex_fast_base_model(model);
+    match base.as_str() {
+        "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" => true,
+        "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => pricing_date
+            .is_none_or(|date| date >= NaiveDate::from_ymd_opt(2026, 8, 5).expect("valid cutoff")),
+        _ => false,
+    }
 }
 
 impl CostUsagePricing {
-    /// Whether one request of `input_tokens` can run in the Fast lane of
-    /// `model`. Older models offer no Fast lane above the long-context
-    /// threshold, so upstream charges such a Priority request the Standard
-    /// cost; Astra publishes long-context Fast rates.
-    pub fn codex_fast_lane_covers(model: &str, input_tokens: u64) -> bool {
+    /// Whether the model's Fast lane covers a request on its usage day.
+    pub fn codex_fast_lane_covers_at_date(
+        model: &str,
+        input_tokens: u64,
+        date: Option<NaiveDate>,
+    ) -> bool {
         Self::codex_api_fast_multiplier(model).is_some()
             && (input_tokens <= CODEX_LONG_CONTEXT_THRESHOLD
-                || codex_fast_allows_long_context(model))
+                || codex_fast_allows_long_context(model, date))
+    }
+
+    pub fn codex_fast_lane_covers(model: &str, input_tokens: u64) -> bool {
+        Self::codex_fast_lane_covers_at_date(model, input_tokens, None)
     }
 
     /// Fast cost in USD of a day aggregate under a Fast key (`-priority` or
@@ -185,7 +196,7 @@ impl CostUsagePricing {
         if base == Self::normalize_codex_model(model) {
             return None;
         }
-        if codex_fast_allows_long_context(model) {
+        if codex_fast_allows_long_context(model, pricing_date) {
             return pricing_date
                 .and_then(|date| {
                     Self::codex_fast_cost_usd_at_date(

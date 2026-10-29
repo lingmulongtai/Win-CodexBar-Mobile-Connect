@@ -385,6 +385,21 @@ static CODEX_PRICING: LazyLock<HashMap<&'static str, CodexPricing>> = LazyLock::
             long_context: None,
         },
     );
+    // OpenAI model cards: standard and >272K whole-request rates, USD/token.
+    // These bundled rates also work offline and avoid catalog threshold drift.
+    for (model, input, cached, output) in [
+        ("gpt-6-sol", 2e-6, 2e-7, 1e-5),
+        ("gpt-6.1-sol", 2e-6, 1e-7, 1e-5),
+        ("gpt-6.1-terra", 1e-6, 5e-8, 5e-6),
+    ] {
+        m.insert(
+            model,
+            codex_pricing::gpt56_pricing(
+                (input, cached, input * 1.25, output),
+                (input * 2.0, cached * 2.0, input * 2.5, output * 1.5),
+            ),
+        );
+    }
     // GPT-6 Astra pricing (OpenAI model card and pricing table).
     // Long-context rates apply to the whole request above 272K input tokens;
     // cache writes bill at 1.25x uncached input in both tiers.
@@ -754,12 +769,12 @@ impl CostUsagePricing {
     /// cost × multiplier. Returns `None` for models without a Fast lane.
     ///
     /// Multipliers: gpt-5.4, gpt-5.4-mini, gpt-5.6-sol, gpt-5.6-terra,
-    /// gpt-5.6-luna → 2.0; gpt-5.5 → 2.5; else nil.
+    /// gpt-5.6-luna and GPT-6 models → 2.0; gpt-5.5 → 2.5; else nil.
     pub fn codex_api_fast_multiplier(model: &str) -> Option<f64> {
         let base = Self::codex_fast_base_model(model);
         match base.as_str() {
             "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
-            | "gpt-6-astra" => Some(2.0),
+            | "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" => Some(2.0),
             "gpt-5.5" => Some(2.5),
             _ => None,
         }
@@ -769,14 +784,13 @@ impl CostUsagePricing {
     ///
     /// Computes the standard cost for the BASE model (stripping fast/priority
     /// suffixes), then applies the Fast multiplier. Returns `None` when the
-    /// model has no Fast lane or when a model without Astra's published
-    /// long-context Fast rates exceeds the 272 000 threshold.
+    /// model has no Fast lane or when the model does not support Fast
+    /// above the 272 000 threshold.
     pub fn codex_fast_cost_usd(model: &str, input: u64, cached: u64, output: u64) -> Option<f64> {
         let multiplier = Self::codex_api_fast_multiplier(model)?;
-        // Older models do not offer Fast for long-context requests. Astra
-        // publishes a Fast rate for the same whole-request long-context tier.
+        // Some older models do not offer Fast for long-context requests.
         if input > codex_pricing::CODEX_LONG_CONTEXT_THRESHOLD
-            && !codex_pricing::codex_fast_allows_long_context(model)
+            && !codex_pricing::codex_fast_allows_long_context(model, None)
         {
             return None;
         }
@@ -872,7 +886,7 @@ impl CostUsagePricing {
     ) -> Option<f64> {
         let multiplier = Self::codex_api_fast_multiplier(model)?;
         if input > codex_pricing::CODEX_LONG_CONTEXT_THRESHOLD
-            && !codex_pricing::codex_fast_allows_long_context(model)
+            && !codex_pricing::codex_fast_allows_long_context(model, Some(pricing_date))
         {
             return None;
         }
