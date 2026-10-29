@@ -1014,18 +1014,7 @@ impl CodexApi {
             .map(rate_window_from_snapshot);
 
         // Build usage snapshot
-        let login_method = response.plan_type.as_ref().map(|pt| match pt.as_str() {
-            "guest" => "Guest".to_string(),
-            "free" => "ChatGPT Free".to_string(),
-            "go" => "ChatGPT Go".to_string(),
-            "plus" => "ChatGPT Plus".to_string(),
-            "pro" => "ChatGPT Pro".to_string(),
-            "team" => "ChatGPT Team".to_string(),
-            "business" => "ChatGPT Business".to_string(),
-            "enterprise" => "ChatGPT Enterprise".to_string(),
-            "education" | "edu" => "ChatGPT Education".to_string(),
-            other => format!("ChatGPT {}", capitalize(other)),
-        });
+        let login_method = response.plan_type.as_deref().map(format_plan_type);
 
         let mut usage = UsageSnapshot::new(primary);
         if let Some(sec) = secondary {
@@ -1210,7 +1199,8 @@ fn format_plan_type(plan_type: &str) -> String {
         "go" => "Codex Go".to_string(),
         "plus" => "ChatGPT Plus".to_string(),
         "pro" => "ChatGPT Pro".to_string(),
-        "pro_lite" | "prolite" | "pro-lite" => "Pro Lite".to_string(),
+        "pro_lite" | "prolite" | "pro-lite" => "ChatGPT Pro 100".to_string(),
+        "pro_max" | "promax" | "pro-max" => "ChatGPT Pro".to_string(),
         "team" => "ChatGPT Team".to_string(),
         "business" => "ChatGPT Business".to_string(),
         "enterprise" => "ChatGPT Enterprise".to_string(),
@@ -1649,6 +1639,14 @@ mod tests {
         assert!(!config_uses_non_chatgpt_provider(
             "model = \"gpt-5\"\napproval_policy = \"never\""
         ));
+    }
+
+    #[test]
+    fn formats_current_specific_pro_plan_names() {
+        assert_eq!(format_plan_type("prolite"), "ChatGPT Pro 100");
+        assert_eq!(format_plan_type("pro_lite"), "ChatGPT Pro 100");
+        assert_eq!(format_plan_type("promax"), "ChatGPT Pro");
+        assert_eq!(format_plan_type("pro"), "ChatGPT Pro");
     }
 
     #[test]
