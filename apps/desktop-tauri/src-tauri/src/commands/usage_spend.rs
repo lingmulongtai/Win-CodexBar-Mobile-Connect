@@ -310,6 +310,7 @@ pub(crate) async fn get_local_usage_spend_summary(
     }
     let force_refresh = force_refresh.unwrap_or(false);
     refresh_opencodex_pricing_before_build(&cached, period, force_refresh).await;
+    let original_cached = cached.clone();
     let built = tauri::async_runtime::spawn_blocking(move || {
         build_usage_spend_summary_cached(&cached, period, force_refresh)
     })
@@ -319,19 +320,24 @@ pub(crate) async fn get_local_usage_spend_summary(
         .lock()
         .map_err(|e| e.to_string())
         .map(|guard| guard.provider_cache.clone())?;
-    let current_key = usage_spend_cache_key(
-        &current_cached,
-        period,
-        &codexbar::settings::Settings::load(),
-    );
+    let current_settings = codexbar::settings::Settings::load();
+    if !current_settings.cost_usage_enabled {
+        return Ok(cost_tracking_off_summary(period));
+    }
+    let current_key = usage_spend_cache_key(&current_cached, period, &current_settings);
     if current_key != built.key {
         if let Some(owner) = built.refresh_owner.as_ref() {
             clear_usage_spend_refresh_if_owned(owner);
         }
-        return Err(
-            "Usage history settings changed during refresh; retrying with the current source"
-                .into(),
-        );
+        if usage_spend_cache_key(&original_cached, period, &current_settings) != built.key {
+            return Err(
+                "Usage history settings changed during refresh; retrying with the current source"
+                    .into(),
+            );
+        }
+        // Normal provider refreshes do not invalidate the local history just
+        // scanned. Keep its pending marker so catch-up retries still run.
+        return Ok(built.summary);
     }
     // A late build with the same cache key must not overwrite a newer generation.
     // Keep the coordinator lock through publication so begin() cannot race it.
@@ -553,14 +559,8 @@ fn build_usage_spend_summary(
         (pi_7_summary, pi_30_summary, pi_period_summary),
     ) = std::thread::scope(|scope| {
         let codex = scope.spawn(move || {
-            let seven = CostScanner::new(7)
-                .with_options(codex_scan_options)
-                .scan_codex();
-            let thirty = CostScanner::new(30)
-                .with_options(codex_scan_options)
-                .scan_codex();
-            let selected = selected_period_scan(period, &seven, &thirty, || {
-                CostScanner::for_period(period)
+            let (seven, thirty, selected) = scan_codex_spend_periods(period, |requested| {
+                CostScanner::for_period(requested)
                     .with_options(codex_scan_options)
                     .scan_codex()
             });
@@ -1052,6 +1052,25 @@ fn build_spend_trend(
 }
 
 /// Reuse the fixed scan when it already covers the selected period.
+/// Populate the widest window first so smaller cards reuse that cache rather
+/// than forcing repeated full parses as 7 days expands to 30 and then 90/all.
+fn scan_codex_spend_periods<T: Clone>(
+    period: CostReportingPeriod,
+    mut scan: impl FnMut(CostReportingPeriod) -> T,
+) -> (T, T, T) {
+    if period == CostReportingPeriod::AllAvailable || period.scan_days(Utc::now()) > 30 {
+        let selected = scan(period);
+        let thirty = scan(CostReportingPeriod::Rolling(30));
+        let seven = scan(CostReportingPeriod::Rolling(7));
+        (seven, thirty, selected)
+    } else {
+        let thirty = scan(CostReportingPeriod::Rolling(30));
+        let seven = scan(CostReportingPeriod::Rolling(7));
+        let selected = selected_period_scan(period, &seven, &thirty, || scan(period));
+        (seven, thirty, selected)
+    }
+}
+
 fn selected_period_scan<T: Clone>(
     period: CostReportingPeriod,
     seven: &T,
@@ -1225,6 +1244,38 @@ fn cached_spend(
 #[cfg(test)]
 mod cache_key_tests {
     use super::*;
+
+    #[test]
+    fn codex_spend_scans_widest_first_and_reuses_selected_baselines() {
+        for (period, expected) in [
+            (
+                CostReportingPeriod::Rolling(7),
+                vec!["rolling:30", "rolling:7"],
+            ),
+            (
+                CostReportingPeriod::Rolling(30),
+                vec!["rolling:30", "rolling:7"],
+            ),
+            (
+                CostReportingPeriod::Rolling(90),
+                vec!["rolling:90", "rolling:30", "rolling:7"],
+            ),
+            (
+                CostReportingPeriod::AllAvailable,
+                vec!["all", "rolling:30", "rolling:7"],
+            ),
+        ] {
+            let mut seen = Vec::new();
+            let (seven, thirty, selected) = scan_codex_spend_periods(period, |p| {
+                seen.push(p.raw());
+                p.raw()
+            });
+            assert_eq!(seen, expected);
+            assert_eq!(seven, "rolling:7");
+            assert_eq!(thirty, "rolling:30");
+            assert_eq!(selected, period.raw());
+        }
+    }
 
     fn local_history(
         total_tokens: u64,
