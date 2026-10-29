@@ -1623,6 +1623,137 @@ fn daily_cost_history(
     (result, daily_incomplete, complete)
 }
 
+/// A separate, current-files-only Codex history for Discord when the shared
+/// usage cache is incomplete. It never changes the dashboard's cache.
+pub(crate) fn isolated_codex_presence_history(
+    now: DateTime<Utc>,
+) -> Option<(NaiveDate, Vec<(String, u64)>)> {
+    use std::sync::Mutex;
+    static SCAN_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = SCAN_LOCK.try_lock().ok()?;
+    let mut options = CostScanOptions::app_driven();
+    options.codex_max_scan_bytes_per_refresh = 2 * 1024 * 1024 * 1024;
+    let scanner = CostScanner::new(31).with_options(options);
+    let roots = scanner.get_codex_sessions_dirs();
+    let root = isolated_presence_cache_root(
+        &JsonlScanner::default_cache_root()?,
+        &roots,
+        &cost_bucket_zone().identifier(),
+    )?;
+    let scanner = scanner.with_cache_root(&root);
+    isolated_codex_presence_history_with_scanner(now, &scanner, &root)
+}
+
+// Scope cache provenance to the exact source roots and bucket zone. A changed
+// configuration must never reuse day totals from a previously selected root.
+fn isolated_presence_cache_root(base: &Path, roots: &[PathBuf], zone: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    if roots.is_empty() {
+        return None;
+    }
+    let mut digest = Sha256::new();
+    digest.update(zone.as_bytes());
+    digest.update([0]);
+    let mut seen = HashSet::new();
+    for root in roots {
+        std::fs::read_dir(root).ok()?;
+        let resolved = std::fs::canonicalize(root).ok()?;
+        let canonical = resolved.to_string_lossy();
+        let original = root.to_string_lossy();
+        let canonical = if cfg!(windows) {
+            canonical.to_ascii_lowercase()
+        } else {
+            canonical.into_owned()
+        };
+        // Preserve the spelling used by the scanner's file keys, even on
+        // case-insensitive filesystems, to prevent reuse across aliases.
+        let original = original.into_owned();
+        // The scanner keys files by their original path. Aliased roots could
+        // otherwise count the same physical files twice.
+        if !seen.insert(canonical.clone()) {
+            return None;
+        }
+        for value in [canonical, original] {
+            digest.update(u64::try_from(value.len()).ok()?.to_le_bytes());
+            digest.update(value.as_bytes());
+        }
+    }
+    let key: String = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Some(base.join("discord-presence").join(key))
+}
+
+fn isolated_codex_presence_history_with_scanner(
+    now: DateTime<Utc>,
+    scanner: &CostScanner,
+    root: &Path,
+) -> Option<(NaiveDate, Vec<(String, u64)>)> {
+    let zone = cost_bucket_zone();
+    let zone_id = zone.identifier();
+    let today = zone.date(now);
+    // Cold caches do not prove that a missing or unreadable root is empty.
+    let roots = scanner.get_codex_sessions_dirs();
+    let base = root.parent()?.parent()?;
+    if isolated_presence_cache_root(base, &roots, &zone_id).as_deref() != Some(root) {
+        return None;
+    }
+    let (summary, _, cache) = scanner.scan_codex_detailed_with_cache(None);
+    let persisted = JsonlScanner::load_cache(ProviderId::Codex, Some(root));
+    let current_zone = cost_bucket_zone();
+    let range = CostUsageDayRange::new(today - Duration::days(30), today);
+    if !summary.history_coverage_established
+        || summary.sessions_count == 0
+        || cache.codex_scan_incomplete
+        || cache.previous_report.is_some()
+        || !JsonlScanner::cache_covers_range(&cache, &range)
+        || serde_json::to_value(&cache).ok()? != serde_json::to_value(&persisted).ok()?
+        || current_zone.identifier() != zone_id
+        || current_zone.date(Utc::now()) != today
+        || scanner.get_codex_sessions_dirs() != roots
+        || isolated_presence_cache_root(base, &roots, &zone_id).as_deref() != Some(root)
+    {
+        return None;
+    }
+    let mut daily: HashMap<String, u64> = (0..31)
+        .map(|offset| (today::day_key(today - Duration::days(offset)), 0))
+        .collect();
+    let mut covered = HashSet::new();
+    fill_codex_daily_tokens(&cache, &mut daily, &mut covered);
+    let mut result: Vec<_> = daily.into_iter().collect();
+    if !result.iter().any(|(_, tokens)| *tokens > 0) {
+        return None;
+    }
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    Some((today, result))
+}
+
+fn fill_codex_daily_tokens(
+    cache: &CostUsageCache,
+    daily_tokens: &mut HashMap<String, u64>,
+    covered_days: &mut HashSet<String>,
+) {
+    for (day_key, models) in &cache.days {
+        if !daily_tokens.contains_key(day_key) {
+            continue;
+        }
+        let Some(day) = CostUsageDayRange::parse_day_key(day_key) else {
+            continue;
+        };
+        let day_range = CostUsageDayRange::new(day, day);
+        let mut one_day = HashMap::new();
+        one_day.insert(day_key.clone(), models.clone());
+        let mut scratch = CostSummary::default();
+        add_codex_days_map_to_summary(&mut scratch, &one_day, &day_range);
+        if let Some(slot) = daily_tokens.get_mut(day_key) {
+            *slot = scratch.total_tokens_for_provider("codex");
+        }
+        covered_days.insert(day_key.clone());
+    }
+}
+
 /// Daily token totals (provider-aware, see [`cache_is_separate_from_input`])
 /// for the Tokens chart mode, plus
 /// whether local history looks incomplete at the old edge of the window
@@ -1647,23 +1778,7 @@ pub fn get_daily_token_history(provider: &str, days: u32) -> (Vec<(String, u64)>
             // from packed days through the same summary path the cost chart
             // uses.
             let (_summary, _stats, cache) = scanner.scan_codex_detailed_with_cache(None);
-            for (day_key, models) in &cache.days {
-                if !daily_tokens.contains_key(day_key) {
-                    continue;
-                }
-                let Some(day) = CostUsageDayRange::parse_day_key(day_key) else {
-                    continue;
-                };
-                let day_range = CostUsageDayRange::new(day, day);
-                let mut one_day = HashMap::new();
-                one_day.insert(day_key.clone(), models.clone());
-                let mut scratch = CostSummary::default();
-                add_codex_days_map_to_summary(&mut scratch, &one_day, &day_range);
-                if let Some(slot) = daily_tokens.get_mut(day_key) {
-                    *slot = scratch.total_tokens_for_provider("codex");
-                }
-                covered_days.insert(day_key.clone());
-            }
+            fill_codex_daily_tokens(&cache, &mut daily_tokens, &mut covered_days);
         }
         "claude" => {
             // Per-day token breakdown from the same de-duplicated record walk

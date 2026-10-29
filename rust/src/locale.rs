@@ -977,6 +977,7 @@ locale_keys! {
     DiscordLiveDisabled,
     DiscordLiveConnecting,
     DiscordUsageAvailable,
+    DiscordUsageLocalOnly,
     DiscordUsagePartial,
     DiscordUsagePartialLoading,
     DiscordUsageLoading,

@@ -1834,3 +1834,4 @@ DiscordUsageUnavailable = 使用量を取得できません。履歴がない、
 DiscordUsageTrackingOff = 使用量を表示するには Usage & Spend の計測をオンにしてください。
 DiscordUsageHidden = 使用量の表示項目がすべてオフです。
 DiscordGithubTest = リンクを開いて確認
+DiscordUsageLocalOnly = D~/W~/M~ は現在読み取れるローカル履歴の集計です。削除済みの履歴は含まれません。他の値は取得できない場合があります。

@@ -3683,3 +3683,63 @@ fn claude_presence_accepts_matching_session_id_spellings_and_rejects_conflicts()
     .unwrap();
     assert_eq!(claude_presence_tokens(&file), None);
 }
+
+#[test]
+fn isolated_presence_history_uses_separate_cache_and_rejects_missing_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    let sessions = dir.path().join("sessions");
+    let removed = write_codex_session_fixture(&sessions, "isolated.jsonl", 100);
+    write_codex_session_fixture(&sessions, "kept.jsonl", 200);
+    let cache_root = isolated_presence_cache_root(
+        dir.path(),
+        std::slice::from_ref(&sessions),
+        &cost_bucket_zone().identifier(),
+    )
+    .unwrap();
+    let scanner = CostScanner::new(31)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![sessions]);
+    let history = isolated_codex_presence_history_with_scanner(Utc::now(), &scanner, &cache_root)
+        .expect("complete local history");
+    assert!(history.1.iter().any(|(_, tokens)| *tokens == 310));
+    std::fs::remove_file(removed).unwrap();
+    let after = isolated_codex_presence_history_with_scanner(Utc::now(), &scanner, &cache_root)
+        .expect("remaining local history");
+    assert!(after.1.iter().any(|(_, tokens)| *tokens == 205));
+    assert!(cache_root.join("cost-usage").join("codex-v1.json").exists());
+    let missing_scanner = CostScanner::new(31)
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![dir.path().join("missing")]);
+    assert!(
+        isolated_codex_presence_history_with_scanner(Utc::now(), &missing_scanner, &cache_root)
+            .is_none()
+    );
+}
+
+#[test]
+fn isolated_presence_cache_is_scoped_to_roots_and_zone() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    let first = isolated_presence_cache_root(dir.path(), std::slice::from_ref(&a), "UTC").unwrap();
+    let second = isolated_presence_cache_root(dir.path(), std::slice::from_ref(&b), "UTC").unwrap();
+    let alias = a.join("..").join("a");
+    let alias_root =
+        isolated_presence_cache_root(dir.path(), std::slice::from_ref(&alias), "UTC").unwrap();
+    assert_ne!(first, alias_root);
+    assert!(isolated_presence_cache_root(dir.path(), &[a.clone(), alias], "UTC").is_none());
+    if cfg!(windows) {
+        let upper = PathBuf::from(a.to_string_lossy().to_ascii_uppercase());
+        let upper_root = isolated_presence_cache_root(dir.path(), &[upper], "UTC").unwrap();
+        assert_ne!(first, upper_root);
+    }
+    let other_zone = isolated_presence_cache_root(dir.path(), &[a], "Asia/Tokyo").unwrap();
+    assert_ne!(first, second);
+    assert_ne!(first, other_zone);
+    assert!(
+        isolated_presence_cache_root(dir.path(), &[dir.path().join("missing")], "UTC").is_none()
+    );
+}

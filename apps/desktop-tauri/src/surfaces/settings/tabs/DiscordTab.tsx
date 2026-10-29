@@ -122,7 +122,7 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
   }, []);
   const activity = snapshot?.status === "connected" ? snapshot.activity : null;
   const usageLabels: Record<DiscordPresenceStatus["usage"], LocaleKey> = {
-    available: "DiscordUsageAvailable", partial: "DiscordUsagePartial", partialLoading: "DiscordUsagePartialLoading",
+    available: "DiscordUsageAvailable", localOnly: "DiscordUsageLocalOnly", partial: "DiscordUsagePartial", partialLoading: "DiscordUsagePartialLoading",
     loading: "DiscordUsageLoading", unavailable: "DiscordUsageUnavailable", trackingOff: "DiscordUsageTrackingOff", hidden: "DiscordUsageHidden",
   };
   return <>

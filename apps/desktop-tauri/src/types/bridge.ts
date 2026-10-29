@@ -1795,7 +1795,7 @@ export interface HooksConfigSave {
 
 export interface DiscordPresenceStatus {
   status: "disabled" | "connecting" | "connected";
-  usage: "available" | "partial" | "partialLoading" | "loading" | "unavailable" | "trackingOff" | "hidden";
+  usage: "available" | "localOnly" | "partial" | "partialLoading" | "loading" | "unavailable" | "trackingOff" | "hidden";
   activity: null | {
     details?: string;
     state?: string;
