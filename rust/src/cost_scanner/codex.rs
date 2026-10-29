@@ -14,7 +14,7 @@ mod scan;
 pub(crate) use cache_days::{
     daily_prices_from_source_rows as codex_daily_request_prices,
     price_summary_from_source_rows as reprice_codex_from_source_rows,
-    request_price_supported as codex_request_price_supported,
+    request_price_supported_with_snapshot as codex_request_price_supported_with_snapshot,
 };
 use cache_days::{price_summary_from_source_rows, rebuild_cache_days};
 use flat_sources::{

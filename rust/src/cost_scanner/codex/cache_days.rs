@@ -120,6 +120,7 @@ struct CodexRequestPrices {
 }
 
 fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> CodexRequestPrices {
+    let snapshot = crate::core::pricing_snapshot();
     let mut data = CodexRequestPrices {
         total: CostSummary::default(),
         daily: HashMap::new(),
@@ -164,7 +165,9 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
                     let output = packed.get(2).copied().unwrap_or(0).max(0) as u64;
                     let date = CostUsageDayRange::parse_day_key(day);
                     let price = |i, c, o| {
-                        CostUsagePricing::codex_day_aggregate_cost_usd(model, i, c, o, date)
+                        CostUsagePricing::codex_day_aggregate_cost_usd_with_snapshot(
+                            model, i, c, o, date, &snapshot,
+                        )
                     };
                     let linear = price(1, 0, 0).zip(price(1, 1, 0)).zip(price(0, 0, 1)).map(
                         |((i, c), o)| {
@@ -180,8 +183,12 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
                         for target in [&mut data.total, data.daily.entry(day.clone()).or_default()]
                         {
                             if let Some(cost) =
-                                crate::codex_costs::add_codex_packed_tokens_to_summary(
-                                    target, model, packed, date,
+                                crate::codex_costs::add_codex_packed_tokens_to_summary_with_snapshot(
+                                    target,
+                                    model,
+                                    packed,
+                                    date,
+                                    Some(&snapshot),
                                 )
                             {
                                 target.total_cost_usd += cost;
@@ -208,7 +215,8 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
             }
             let model = row_priced_model(row, overlay.as_ref())
                 .unwrap_or_else(|| CostUsagePricing::CODEX_UNATTRIBUTED_MODEL.to_string());
-            if !request_price_supported(Path::new(path), row, &model) {
+            if !request_price_supported_with_snapshot(Path::new(path), row, &model, Some(&snapshot))
+            {
                 data.missing
                     .entry(row.day_key.clone())
                     .or_default()
@@ -223,12 +231,15 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
                 &mut data.total,
                 data.daily.entry(row.day_key.clone()).or_default(),
             ] {
-                if let Some(cost) = crate::codex_costs::add_codex_packed_tokens_to_summary(
-                    priced,
-                    &model,
-                    &packed,
-                    CostUsageDayRange::parse_day_key(&row.day_key),
-                ) {
+                if let Some(cost) =
+                    crate::codex_costs::add_codex_packed_tokens_to_summary_with_snapshot(
+                        priced,
+                        &model,
+                        &packed,
+                        CostUsageDayRange::parse_day_key(&row.day_key),
+                        Some(&snapshot),
+                    )
+                {
                     priced.total_cost_usd += cost;
                 }
             }
@@ -243,7 +254,14 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
             // verified as one request. Keep its tokens but report it unpriced.
             let model = row_priced_model(row, None)
                 .unwrap_or_else(|| CostUsagePricing::CODEX_UNATTRIBUTED_MODEL.to_string());
-            if !linear_price_matches(&model, row.input, row.cached, row.output, &row.day_key) {
+            if !linear_price_matches(
+                &model,
+                row.input,
+                row.cached,
+                row.output,
+                &row.day_key,
+                Some(&snapshot),
+            ) {
                 data.missing
                     .entry(row.day_key.clone())
                     .or_default()
@@ -258,12 +276,15 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
                 &mut data.total,
                 data.daily.entry(row.day_key.clone()).or_default(),
             ] {
-                if let Some(cost) = crate::codex_costs::add_codex_packed_tokens_to_summary(
-                    target,
-                    &model,
-                    &packed,
-                    CostUsageDayRange::parse_day_key(&row.day_key),
-                ) {
+                if let Some(cost) =
+                    crate::codex_costs::add_codex_packed_tokens_to_summary_with_snapshot(
+                        target,
+                        &model,
+                        &packed,
+                        CostUsageDayRange::parse_day_key(&row.day_key),
+                        Some(&snapshot),
+                    )
+                {
                     target.total_cost_usd += cost;
                 }
             }
@@ -481,12 +502,24 @@ fn request_usage_matches(path: &Path, row: &CodexSourceUsageRow) -> bool {
         && cached == row.cached
 }
 
-fn linear_price_matches(model: &str, input: i64, cached: i64, output: i64, day: &str) -> bool {
+fn linear_price_matches(
+    model: &str,
+    input: i64,
+    cached: i64,
+    output: i64,
+    day: &str,
+    snapshot: Option<&crate::core::ModelsDevPricingSnapshot>,
+) -> bool {
     let input = u64::try_from(input.max(0)).unwrap_or(0);
     let cached = u64::try_from(cached.max(0)).unwrap_or(0).min(input);
     let output = u64::try_from(output.max(0)).unwrap_or(0);
     let date = CostUsageDayRange::parse_day_key(day);
-    let price = |i, c, o| CostUsagePricing::codex_day_aggregate_cost_usd(model, i, c, o, date);
+    let price = |i, c, o| match snapshot {
+        Some(snapshot) => CostUsagePricing::codex_day_aggregate_cost_usd_with_snapshot(
+            model, i, c, o, date, snapshot,
+        ),
+        None => CostUsagePricing::codex_day_aggregate_cost_usd(model, i, c, o, date),
+    };
     let linear = price(1, 0, 0)
         .zip(price(1, 1, 0))
         .zip(price(0, 0, 1))
@@ -496,7 +529,18 @@ fn linear_price_matches(model: &str, input: i64, cached: i64, output: i64, day: 
         .is_none_or(|(a, b)| (a - b).abs() < 1e-9)
 }
 
-pub(crate) fn request_price_supported(path: &Path, row: &CodexSourceUsageRow, model: &str) -> bool {
-    linear_price_matches(model, row.input, row.cached, row.output, &row.day_key)
-        || request_usage_matches(path, row)
+pub(crate) fn request_price_supported_with_snapshot(
+    path: &Path,
+    row: &CodexSourceUsageRow,
+    model: &str,
+    snapshot: Option<&crate::core::ModelsDevPricingSnapshot>,
+) -> bool {
+    linear_price_matches(
+        model,
+        row.input,
+        row.cached,
+        row.output,
+        &row.day_key,
+        snapshot,
+    ) || request_usage_matches(path, row)
 }
