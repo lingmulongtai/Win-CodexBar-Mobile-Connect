@@ -67,6 +67,15 @@ describe("usage spend provider breakdown", () => {
     expect(codex.costIsPartial).toBe(true);
   });
 
+  it("does not count an imported amount twice when merged into a partial model", () => {
+    const [codex] = buildSpendProviderGroups(contract({
+      knownCostUsd: 2,
+      priceCoverage: { priced: 0, estimated: 1, unpriced: 1, unmetered: 0 },
+      models: [{ ...model("mixed", null, 100), partialCostUsd: 14.5 }],
+    }), "Codex");
+    expect(codex.costUsd).toBe(14.5);
+  });
+
   it("returns no groups without model-level history", () => {
     expect(buildSpendProviderGroups(contract({ models: [] }), "Codex")).toEqual([]);
   });

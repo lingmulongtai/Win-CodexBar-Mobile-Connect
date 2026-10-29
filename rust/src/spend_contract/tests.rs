@@ -928,6 +928,10 @@ fn partial_model_pricing_keeps_known_subtotal_and_unpriced_coverage() {
     assert_eq!(rows[0].partial_cost_usd, Some(12.5));
     assert_eq!(coverage_for_models(&rows).unpriced, 1);
     assert_eq!(known_subtotal(&rows, &summary), None);
+    let contract =
+        build_local_spend_contract_from_summary("codex", 7, false, false, false, summary.clone());
+    assert_eq!(contract.provenance, CostProvenance::ListPriceEstimate);
+    assert_eq!(contract.known_cost_usd, None);
     let mut incoming = rows[0].clone();
     incoming.cost_usd = Some(2.0);
     incoming.partial_cost_usd = None;

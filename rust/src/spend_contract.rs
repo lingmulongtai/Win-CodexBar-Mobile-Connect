@@ -534,7 +534,9 @@ fn build_contract_from_period_summary_inner(
     let native_models = model_rows(provider_id, &summary, &custom);
     let native_coverage = coverage_for_models(&native_models);
     let native_cost = known_subtotal(&native_models, &summary);
-    let native_has_window_costs = native_models.iter().any(|model| model.cost_usd.is_some());
+    let native_has_window_costs = native_models
+        .iter()
+        .any(|model| model.cost_usd.is_some() || model.partial_cost_usd.is_some());
     let native_provenance = CostProvenance::for_window(
         CostProvenance::ListPriceEstimate,
         native_has_window_costs,
