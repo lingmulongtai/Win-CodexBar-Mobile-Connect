@@ -231,7 +231,7 @@ impl CodexWorkspacesIndex {
         for (idx, path) in files.iter().enumerate() {
             match index_one_file(path, &range) {
                 Some(parsed) => {
-                    merge_daily(&mut daily_acc, &parsed.day_models);
+                    merge_daily(&mut daily_acc, &parsed.day_models, &parsed.day_costs);
                     let turns = scan_session_turns(path, &parsed.session_id, &range);
                     session_turns
                         .entry(parsed.session_id.clone())
@@ -334,6 +334,7 @@ struct ParsedFile {
     cost: CostEstimate,
     model_tokens: HashMap<String, u64>,
     day_models: HashMap<String, HashMap<String, (u64, u64, u64)>>,
+    day_costs: HashMap<String, CostEstimate>,
     started_at: Option<DateTime<Utc>>,
     latest_activity: Option<DateTime<Utc>>,
 }
@@ -530,6 +531,7 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
     let mut cost = CostEstimate::default();
     let mut model_tokens: HashMap<String, u64> = HashMap::new();
     let mut day_models: HashMap<String, HashMap<String, (u64, u64, u64)>> = HashMap::new();
+    let mut day_costs: HashMap<String, CostEstimate> = HashMap::new();
 
     for (record, _) in &parsed.records {
         let input = record.input.max(0) as u64;
@@ -550,9 +552,16 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         day_entry.1 = day_entry.1.saturating_add(cached);
         day_entry.2 = day_entry.2.saturating_add(output);
 
+        let daily = day_costs.entry(record.day_key.clone()).or_default();
         match codex_cost_on_day(&record.day_key, &model, input, cached, output) {
-            Some(usd) => cost.known_usd += usd,
-            None => cost.unknown_tokens = cost.unknown_tokens.saturating_add(tokens),
+            Some(usd) => {
+                cost.known_usd += usd;
+                daily.known_usd += usd;
+            }
+            None => {
+                cost.unknown_tokens = cost.unknown_tokens.saturating_add(tokens);
+                daily.unknown_tokens = daily.unknown_tokens.saturating_add(tokens);
+            }
         }
     }
 
@@ -588,6 +597,7 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         cost,
         model_tokens,
         day_models,
+        day_costs,
         started_at,
         latest_activity,
     })
@@ -596,16 +606,25 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
 fn merge_daily(
     daily: &mut HashMap<String, DailyAcc>,
     day_models: &HashMap<String, HashMap<String, (u64, u64, u64)>>,
+    day_costs: &HashMap<String, CostEstimate>,
 ) {
     for (day, models) in day_models {
         let acc = daily.entry(day.clone()).or_default();
-        for (model, (input, cached, output)) in models {
-            let tokens = input.saturating_add(*output);
-            acc.total_tokens = acc.total_tokens.saturating_add(tokens);
+        for (input, cached, output) in models.values() {
+            acc.total_tokens = acc
+                .total_tokens
+                .saturating_add(input.saturating_add(*output));
             acc.cached_input_tokens = acc.cached_input_tokens.saturating_add(*cached);
-            match codex_cost_on_day(day, model, *input, *cached, *output) {
-                Some(usd) => acc.known_usd += usd,
-                None => acc.unknown_tokens = acc.unknown_tokens.saturating_add(tokens),
+        }
+        if let Some(cost) = day_costs.get(day) {
+            acc.known_usd += cost.known_usd;
+            acc.unknown_tokens = acc.unknown_tokens.saturating_add(cost.unknown_tokens);
+        } else {
+            // Missing request-level cost is unknown, not a free day.
+            for (input, _, output) in models.values() {
+                acc.unknown_tokens = acc
+                    .unknown_tokens
+                    .saturating_add(input.saturating_add(*output));
             }
         }
     }
@@ -1032,7 +1051,15 @@ mod tests {
         let sol = |day: &str| {
             let models = HashMap::from([("gpt-5.6-sol".to_string(), (100, 10, 5))]);
             let mut daily = HashMap::new();
-            merge_daily(&mut daily, &HashMap::from([(day.to_string(), models)]));
+            let cost = CostEstimate {
+                known_usd: codex_cost_on_day(day, "gpt-5.6-sol", 100, 10, 5).unwrap(),
+                unknown_tokens: 0,
+            };
+            merge_daily(
+                &mut daily,
+                &HashMap::from([(day.to_string(), models)]),
+                &HashMap::from([(day.to_string(), cost)]),
+            );
             daily[day].known_usd
         };
         let historical = 90.0 * 5e-6 + 10.0 * 5e-7 + 5.0 * 3e-5;
