@@ -6,6 +6,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde_json::{Value, json};
 
 mod metadata;
+pub mod pet_links;
 
 pub(crate) const MAX_OPEN_TURN_SECONDS: i64 = 4 * 60 * 60;
 
@@ -247,16 +248,17 @@ pub fn activity_for_session_with_options(
             )
         })
         .unwrap_or_default();
-    let mut details = meta.model.filter(|_| options.show_model).map_or_else(
-        || format!("⚡ Using {name}"),
-        |model| {
-            if options.format == "compact" {
-                format!("⚡ {name}: {model}")
-            } else {
-                format!("⚡ {name} · {model}")
-            }
-        },
-    );
+    let mut details = meta
+        .model
+        .filter(|_| options.show_model && options.format != "service")
+        .map_or_else(
+            || format!("⚡ Using {name}"),
+            |model| match options.format.as_str() {
+                "compact" => format!("⚡ {name}: {model}"),
+                "modelFirst" => format!("⚡ {model} · {name}"),
+                _ => format!("⚡ {name} · {model}"),
+            },
+        );
     if let Some(effort) = meta.effort.filter(|_| options.show_mode) {
         details.push_str(&format!(" ({effort})"));
     }
@@ -304,6 +306,17 @@ pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions
     {
         object.remove("buttons");
     }
+    if options.show_github
+        && let Ok(url) = reqwest::Url::parse(options.github_url.trim())
+        && url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url.port_or_known_default() == Some(443)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && options.github_url.len() <= 512
+    {
+        activity["buttons"][0]["url"] = json!(url.as_str());
+    }
     if !options.show_emoji {
         for key in ["details", "state"] {
             if let Some(text) = activity[key].as_str() {
@@ -316,10 +329,10 @@ pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions
             }
         }
     }
-    if options.format == "compact" {
-        if let Some(details) = activity["details"].as_str() {
-            activity["details"] = json!(details.replace("Using ", ""));
-        }
+    if options.format == "compact"
+        && let Some(details) = activity["details"].as_str()
+    {
+        activity["details"] = json!(details.replace("Using ", ""));
     }
     // Only public HTTPS URLs may be sent to Discord. Never transmit local paths,
     // credentials, fragments, or a malformed value as an image reference.
@@ -475,11 +488,40 @@ mod tests {
             activity["assets"]["large_image"],
             "https://example.com/pet.gif"
         );
+        options.format = "modelFirst".into();
+        let activity = activity_for_session_with_options(&s, now, false, None, &options);
+        assert_eq!(activity["details"], "gpt-6.1 · Codex");
+        options.format = "service".into();
+        let activity = activity_for_session_with_options(&s, now, false, None, &options);
+        assert_eq!(activity["details"], "Using Codex");
+        options.format = "compact".into();
         options.show_model = false;
         options.image_url = "https://secret@example.com/pet.gif".into();
         let activity = activity_for_session_with_options(&s, now, false, None, &options);
         assert_eq!(activity["details"], "Codex");
         assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+    }
+
+    #[test]
+    fn github_button_uses_the_chosen_link_only_when_valid_and_enabled() {
+        let mut options = DiscordPresenceOptions {
+            github_url: "https://github.com/example/project".into(),
+            ..Default::default()
+        };
+        let activity = idle_activity_with_options(None, None, &options);
+        assert_eq!(
+            activity["buttons"][0]["url"],
+            "https://github.com/example/project"
+        );
+        options.github_url = "https://github.com.attacker.example/project".into();
+        let activity = idle_activity_with_options(None, None, &options);
+        assert_eq!(activity["buttons"][0]["url"], REPOSITORY_URL);
+        options.show_github = false;
+        assert!(
+            idle_activity_with_options(None, None, &options)
+                .get("buttons")
+                .is_none()
+        );
     }
 
     #[test]

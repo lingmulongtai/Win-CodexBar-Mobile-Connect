@@ -149,7 +149,9 @@ mod windows {
                 result = scanner.scan_for_presence() => result,
             };
             let now = chrono::Utc::now();
-            let tokens_enabled = codexbar::settings::Settings::load().cost_usage_enabled;
+            let settings = codexbar::settings::Settings::load();
+            let tokens_enabled = settings.cost_usage_enabled;
+            let options = settings.discord_presence_options;
             let today = codexbar::cost_reporting_period::cost_bucket_zone().date(now);
             if usage_day.is_some_and(|day| day != today) {
                 usage_task_valid = false;
@@ -186,11 +188,12 @@ mod windows {
             }
             // Session selection may read bounded transcript tails. Keep it
             // off the async runtime and reuse the result for the payload.
+            let priority = options.priority.clone();
             let active_session = tokio::select! {
                 biased;
                 changed = enabled.changed() => { if changed.is_err() { break; } continue; },
                 result = tokio::task::spawn_blocking(move || {
-                    codexbar::discord_presence::current_session(&scan.sessions, now).cloned()
+                    codexbar::discord_presence::current_session_with_priority(&scan.sessions, now, &priority).cloned()
                 }) => result.ok().flatten(),
             };
             let provider = active_session.as_ref().map(|session| session.provider);
@@ -217,6 +220,7 @@ mod windows {
                 }),
                 _ => None,
             };
+            let active_options = options.clone();
             let activity = if let Ok(permit) = metadata_slot.clone().try_acquire_owned() {
                 tokio::select! {
                     biased;
@@ -224,11 +228,11 @@ mod windows {
                     result = tokio::task::spawn_blocking(move || {
                         let _permit = permit;
                         active_session.as_ref().map(|session| {
-                            codexbar::discord_presence::activity_for_session(session, now, tokens_enabled, periods)
+                            codexbar::discord_presence::activity_for_session_with_options(session, now, tokens_enabled, periods, &active_options)
                         })
                     }) => result.ok().flatten(),
                 }
-            } else { None }.unwrap_or_else(|| codexbar::discord_presence::idle_activity_with_usage(selected, periods));
+            } else { None }.unwrap_or_else(|| codexbar::discord_presence::idle_activity_with_options(selected, periods, &options));
             if stream.is_none() {
                 tokio::select! {
                     biased;
@@ -350,3 +354,8 @@ pub fn install(_: bool) {}
 pub fn settings_changed(_: bool) {}
 #[cfg(not(windows))]
 pub fn shutdown() {}
+
+#[tauri::command]
+pub async fn resolve_codex_pet(link: String) -> Result<String, String> {
+    codexbar::discord_presence::pet_links::resolve(&link).await
+}

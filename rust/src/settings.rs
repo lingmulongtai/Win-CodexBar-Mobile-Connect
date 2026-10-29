@@ -121,6 +121,7 @@ pub struct DiscordPresenceOptions {
     pub show_week: bool,
     pub show_month: bool,
     pub show_github: bool,
+    pub github_url: String,
     pub show_emoji: bool,
     pub image_url: String,
 }
@@ -138,6 +139,7 @@ impl Default for DiscordPresenceOptions {
             show_week: true,
             show_month: true,
             show_github: true,
+            github_url: String::new(),
             show_emoji: true,
             image_url: String::new(),
         }

@@ -238,6 +238,22 @@ export interface ProviderSummary {
   order: number;
 }
 
+export interface DiscordPresenceOptions {
+  priority: "recent" | "codex" | "claude";
+  format: "detailed" | "compact" | "modelFirst" | "service";
+  showModel: boolean;
+  showMode: boolean;
+  showElapsed: boolean;
+  showSessionTokens: boolean;
+  showToday: boolean;
+  showWeek: boolean;
+  showMonth: boolean;
+  showGithub: boolean;
+  githubUrl: string;
+  showEmoji: boolean;
+  imageUrl: string;
+}
+
 export interface SettingsSnapshot {
   platformCapabilities?: {
     startAtLogin: boolean;
@@ -316,6 +332,7 @@ export interface SettingsSnapshot {
   antigravityAdditionalProfileHomes: string[];
   agentSessionsEnabled?: boolean;
   discordPresenceEnabled?: boolean;
+  discordPresenceOptions?: DiscordPresenceOptions;
   /** Hold system awake while a local agent session is live. */
   stayAwakeEnabled?: boolean;
   agentSessionSshHosts?: string[];
@@ -479,6 +496,7 @@ export interface SettingsUpdate {
   antigravityAdditionalProfileHomes?: string[];
   agentSessionsEnabled?: boolean;
   discordPresenceEnabled?: boolean;
+  discordPresenceOptions?: Partial<DiscordPresenceOptions>;
   stayAwakeEnabled?: boolean;
   agentSessionSshHosts?: string[];
   hooksEnabled?: boolean;
