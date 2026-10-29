@@ -608,7 +608,7 @@ pub(super) fn cached_codex_file_is_complete_for_range(
     path_key: &str,
     range: &CostUsageDayRange,
 ) -> bool {
-    JsonlScanner::cache_covers_range(cache, range)
+    codex_cache_covers_file(cache, path_key, range)
         && cache.files.get(path_key).is_some_and(|usage| {
             let Ok(metadata) = fs::metadata(path_key) else {
                 return false;

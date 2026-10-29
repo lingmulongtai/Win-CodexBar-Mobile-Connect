@@ -3034,6 +3034,60 @@ fn pending_codex_options(force: bool) -> CostScanOptions {
 }
 
 #[test]
+fn widened_codex_catch_up_makes_progress_across_reopened_scans() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let cache_root = root.path().join("cache");
+    for index in 0..8 {
+        let path =
+            write_codex_session_fixture(&sessions, &format!("range-{index}.jsonl"), 100 + index);
+        let old_timestamp = (recent_codex_fixture_time() - Duration::days(12)).to_rfc3339();
+        let old_row = format!(
+            r#"{{"timestamp":"{old_timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"model":"gpt-5","total_token_usage":{{"input_tokens":10,"cached_input_tokens":0,"output_tokens":1}}}}}}}}
+"#
+        );
+        let current = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{old_row}{current}")).unwrap();
+        if index < 3 {
+            std::fs::write(path.with_file_name(format!("empty-{index}.jsonl")), b"").unwrap();
+        }
+    }
+    let reference = CostScanner::new(30)
+        .with_cache_root(root.path().join("reference"))
+        .with_sessions_dirs(vec![sessions.clone()])
+        .scan_codex();
+    assert!(reference.history_coverage_established);
+    let mut old = CostUsageCache {
+        scan_since_key: Some("2000-01-01".to_string()),
+        scan_until_key: Some("2000-01-31".to_string()),
+        ..CostUsageCache::default()
+    };
+    JsonlScanner::save_cache(ProviderId::Codex, &mut old, Some(&cache_root));
+    let options = CostScanOptions {
+        codex_candidate_limit: 1,
+        ..CostScanOptions::default()
+    };
+    let mut complete = None;
+    for iteration in 0..40 {
+        let days = if iteration % 2 == 0 { 30 } else { 7 };
+        let (summary, _, cache) = CostScanner::new(days)
+            .with_options(options)
+            .with_cache_root(&cache_root)
+            .with_sessions_dirs(vec![sessions.clone()])
+            .scan_codex_detailed_with_cache(None);
+        if !cache.codex_scan_incomplete && days == 30 {
+            complete = Some(summary);
+            break;
+        }
+    }
+    let complete = complete.expect("bounded catch-up must eventually complete");
+    assert!(complete.history_coverage_established);
+    assert_eq!(complete.input_tokens, reference.input_tokens);
+    assert_eq!(complete.output_tokens, reference.output_tokens);
+    assert_eq!(complete.by_model, reference.by_model);
+}
+
+#[test]
 fn pending_codex_scan_30_to_7_keeps_wide_start_and_narrow_report() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");

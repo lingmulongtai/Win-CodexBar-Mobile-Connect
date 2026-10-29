@@ -278,6 +278,16 @@ pub(super) fn scan_codex_detailed_with_cache(
         && (cache.scan_since_key.is_some() || !cache.days.is_empty() || !cache.files.is_empty()))
     .then(|| JsonlScanner::cached_cost_report_for_range(&cache, &range));
 
+    // Keep per-file progress only while the source identity remains the same.
+    // Explicit refreshes may resume the same bounded work, but a new root,
+    // timezone or end date must not inherit this evidence.
+    if cache.codex_pending_scan_root_paths != pending_scan.root_paths
+        || cache.codex_pending_scan_timezone.as_deref() != Some(pending_scan.timezone.as_str())
+        || cache.codex_pending_scan_until_key.as_deref() != Some(scan_range.scan_until_key.as_str())
+    {
+        cache.codex_pending_file_ranges.clear();
+    }
+
     // Persist the source-bound work range before doing bounded work.
     cache.codex_pending_scan_since_key = Some(scan_range.scan_since_key.clone());
     cache.codex_pending_scan_until_key = Some(scan_range.scan_until_key.clone());
@@ -382,6 +392,7 @@ pub(super) fn scan_codex_detailed_with_cache(
     };
 
     let mut incomplete_processed = Vec::new();
+    let mut completed_file = false;
     for (index, candidate) in work_queue.iter().enumerate() {
         let refresh_remaining = refresh_byte_limit.saturating_sub(bytes_read_this_refresh);
         let allowance = per_file_limit.min(refresh_remaining);
@@ -394,6 +405,8 @@ pub(super) fn scan_codex_detailed_with_cache(
             break;
         }
 
+        let key = candidate.path.to_string_lossy().to_string();
+        let previously_covered = codex_cache_covers_file(&cache, &key, scan_range);
         let outcome = scanner.parse_codex_file_bounded(
             &candidate.path,
             scan_range,
@@ -409,7 +422,6 @@ pub(super) fn scan_codex_detailed_with_cache(
         stats.codex_bytes_read = stats
             .codex_bytes_read
             .saturating_add(u64::try_from(outcome.bytes_read.max(0)).unwrap_or(u64::MAX));
-        let key = candidate.path.to_string_lossy().to_string();
         pending_next.retain(|pending| pending != &key);
         let observed_size = fs::metadata(&candidate.path)
             .ok()
@@ -426,6 +438,19 @@ pub(super) fn scan_codex_detailed_with_cache(
             .files
             .get(&key)
             .is_some_and(|usage| codex_logical_target_has_unconsumed_tail(observed_size, usage));
+        let completely_consumed = outcome.is_complete && !has_unconsumed_tail;
+        if (outcome.bytes_read > 0
+            || completely_consumed
+            || (previously_covered && outcome.reused_validated_prefix))
+            && cache.files.contains_key(&key)
+        {
+            cache.codex_pending_file_ranges.insert(
+                key.clone(),
+                (scan_range.since_key.clone(), scan_range.until_key.clone()),
+            );
+        }
+        completed_file |= completely_consumed
+            && cached_codex_file_is_complete_for_range(&cache, &lineage_planner, &key, scan_range);
         if !outcome.is_complete || has_unconsumed_tail {
             incomplete_processed.push(key);
             stats.files_deferred = stats.files_deferred.saturating_add(1);
@@ -496,8 +521,9 @@ pub(super) fn scan_codex_detailed_with_cache(
         &cache,
         discovery_complete,
         is_cancelled(cancel),
-        !pruned_paths_pending.is_empty(),
+        !pruned_paths_pending.is_empty() && !scanner.options.is_app_driven(),
         bytes_read_this_refresh,
+        completed_file,
     );
     let priority_validation_pending =
         resolve_codex_priority_evidence(scanner, &mut cache, start_date, cancel);
@@ -536,6 +562,7 @@ pub(super) fn scan_codex_detailed_with_cache(
         cache.codex_pending_scan_until_key = None;
         cache.codex_pending_scan_root_paths.clear();
         cache.codex_pending_scan_timezone = None;
+        cache.codex_pending_file_ranges.clear();
         cache.previous_report = None;
         cache.codex_scan_pause_reason = None;
     }

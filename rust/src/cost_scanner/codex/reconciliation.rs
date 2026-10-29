@@ -211,6 +211,7 @@ pub(super) fn reconcile_missing_codex_cache_files(
 ) {
     for path in missing_codex_cache_paths(cache, sessions_dirs, range) {
         cache.files.remove(&path);
+        cache.codex_pending_file_ranges.remove(&path);
     }
     cache
         .codex_pending_paths
