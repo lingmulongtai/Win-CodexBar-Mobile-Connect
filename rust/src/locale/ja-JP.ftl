@@ -1837,3 +1837,10 @@ DiscordUsageTrackingOff = 使用量を表示するには Usage & Spend の計測
 DiscordUsageHidden = 使用量の表示項目がすべてオフです。
 DiscordGithubTest = リンクを開いて確認
 DiscordUsageLocalOnly = D~/W~/M~ は現在読み取れるローカル履歴の集計です。削除済みの履歴は含まれません。他の値は取得できない場合があります。
+
+CodexAccountLifetime = Codex アカウントの累計トークン
+CodexAccountUsageCaption = 標準の Codex CLI アカウントのプロフィール集計。下のモデル別・金額はこの PC に残る履歴からの推定です。
+CodexAccountUsageUnavailable = Codex アカウントの累計を取得できません。
+
+UsageSpendDiagnostics = 診断ログ
+UsageSpendDiagnosticsRefresh = ログを更新
