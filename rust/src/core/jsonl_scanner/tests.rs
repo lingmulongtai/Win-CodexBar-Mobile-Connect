@@ -961,6 +961,20 @@ fn codex_turn_context_wins_over_conflicting_event_model() {
 }
 
 #[test]
+fn codex_preserves_model_and_cumulative_baseline_before_requested_window() {
+    let day = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+    let range = CostUsageDayRange::new(day, day);
+    let mut parser = CodexParserState::new(None, None);
+    parser.process_line(r#"{"timestamp":"2026-05-30T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}"#, &range);
+    parser.process_line(r#"{"timestamp":"2026-05-30T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20}}}}"#, &range);
+    parser.process_line(r#"{"timestamp":"2026-05-31T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":60,"output_tokens":30}}}}"#, &range);
+    assert_eq!(parser.records.len(), 1);
+    let row = &parser.records[0].0;
+    assert_eq!(row.model, "gpt-5.6-sol");
+    assert_eq!((row.input, row.cached, row.output), (50, 20, 10));
+}
+
+#[test]
 fn codex_blank_context_clears_stale_model_and_emits_unattributed_usage() {
     let day = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
     let range = CostUsageDayRange::new(day, day);
