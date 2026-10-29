@@ -3668,3 +3668,18 @@ fn paused_scan_without_previous_report_reports_only_the_requested_days() {
     assert_eq!(month_summary.output_tokens, 60);
     assert!(today_summary.total_cost_usd < month_summary.total_cost_usd);
 }
+
+#[test]
+fn claude_presence_accepts_matching_session_id_spellings_and_rejects_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("session.jsonl");
+    let row = r#"{"type":"assistant","timestamp":"2026-10-29T00:00:00Z","sessionId":"s1","session_id":"s1","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":2}}}"#;
+    std::fs::write(&file, row).unwrap();
+    assert_eq!(claude_presence_tokens(&file), Some(12));
+    std::fs::write(
+        &file,
+        row.replace("\"session_id\":\"s1\"", "\"session_id\":\"other\""),
+    )
+    .unwrap();
+    assert_eq!(claude_presence_tokens(&file), None);
+}
