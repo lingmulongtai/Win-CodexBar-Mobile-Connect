@@ -173,6 +173,13 @@ fn parses_current_snake_case_oauth_usage_response() {
     };
     let usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &credentials);
 
+    assert_eq!(usage.login_method.as_deref(), Some("Claude (OAuth)"));
+    let pro = ClaudeOAuthCredentials {
+        rate_limit_tier: Some("default_claude_pro".into()),
+        ..credentials
+    };
+    let pro_usage = ClaudeOAuthFetcher::new().build_usage_snapshot(&response, &pro);
+    assert_eq!(pro_usage.login_method.as_deref(), Some("Claude Pro"));
     assert_eq!(usage.primary.used_percent, 1.0);
     assert!((usage.secondary.expect("weekly").used_percent - 0.14).abs() < 0.001);
     let scoped = usage
