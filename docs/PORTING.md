@@ -301,3 +301,53 @@ Bug fixes landed alongside the ports: #333, #334, #335, #336, #342, #343.
 - [CONFIGURATION.md](./CONFIGURATION.md) — settings stores / DPAPI paths
 - [BUILDING.md](./BUILDING.md) — build and test entry points
 - Root [AGENTS.md](../AGENTS.md) — CUA proof and agent rules
+
+---
+
+# Upstream review — 2026-10-29
+
+The read-only `nesszer/Win-CodexBar` default branch was fetched at
+`1d3c1305bfb643b6ea643d176bdc31c381ba27b1`. The fork baseline was
+`46b8a34f66bc9ab885e3c4fdee3e2db0da6fb0bf`, with merge base
+`1e0a414cc10c6429a106f4674637427333518afa`. At review time the branches had
+165 fork-side and 147 upstream-side commits since the merge base. These counts
+are divergence counts, not a claim that every change is missing from the fork.
+A repeat fetch returned the same upstream SHA.
+
+The following changes were ported into this fork without changing its Mobile
+Connect, Discord, signer or updater ownership:
+
+| Upstream commit | Fork commits | Change |
+| --- | --- | --- |
+| `1d3c1305` | `f39d6bbb` | Light Settings usage and pace colors. The same upstream commit's abliteration.ai row fix is not applicable without the absent provider. |
+| `c811e376` | `dc37aede` | Tavily usage remains visible when the pay-as-you-go cap is null. |
+| `48ce07d5` | `827693ba`, `d0fc8c46` | Codex history uses token-event times; unordered events fall back to day/file-time bounds rather than inventing an exact end. |
+| `be3bcea5` | `af608b74` | Codex Free's fixed 30-day allowance receives reset-window pace. |
+| `ffbbefea` | `7031b703` | Claude plan IDs map to branded names while preserving the fork's older Max 5/20 tier formats. |
+| `8d1219ce` | `187c2eea` | Passive Antigravity and CodeRabbit CLI probes disable those tools' self-updaters. |
+| `a3008eba` | `54aab370` | Cursor encrypted app sessions use the existing DPAPI/AES-GCM path; oversized stored values are rejected before copying or decoding. |
+
+## Deferred work
+
+- `6f029a76` adds opt-in OpenCode history to Codex cost reporting across scanners,
+  settings and charts. A partial port could double-count or change the fork's
+  Discord token totals, so it needs a separate end-to-end accounting review.
+- `559a33a9` adds Kimi monthly breakdowns against a different upstream fetch
+  result and balance model. Porting it requires reconciling the fork's web/API
+  source selection and Mobile Connect presentation together.
+- The abliteration.ai provider introduced by `2d088a00` is absent from the
+  fork, so the associated row-label correction in `1d3c1305` cannot be ported
+  alone. Adding a provider is a separate integration, not a theme fix.
+- The remaining divergent history was not blindly merged. Credential changes,
+  new providers, release scripts and broader architectural refactors require
+  separate compatibility checks against the fork's acquisition modes and
+  owned release flow.
+
+## Validation
+
+Focused Tavily and light-theme tests passed. The Windows run of `cargo test -p
+codexbar --lib` passed 4,922 tests with two ignored, using synthetic Cursor
+Safe Storage fixtures; the live Cursor account and DPAPI path were not tested.
+The frontend suite passed 1,371 tests, and `pnpm run build` and locale parity
+passed. Eighteen desktop pace-bridge tests passed. The final native build and
+runtime UI proof are tracked in the delivery report for this branch.

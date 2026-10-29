@@ -820,8 +820,12 @@ impl ClaudeOAuthFetcher {
         }
 
         // Login method from rate limit tier or default
-        if let Some(tier) = &credentials.rate_limit_tier {
-            usage = usage.with_login_method(super::claude_plan_label(tier));
+        if let Some(label) = credentials
+            .rate_limit_tier
+            .as_deref()
+            .and_then(super::claude_plan_label)
+        {
+            usage = usage.with_login_method(label);
         } else {
             usage = usage.with_login_method("Claude (OAuth)");
         }

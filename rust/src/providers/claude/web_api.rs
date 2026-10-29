@@ -421,8 +421,12 @@ impl ClaudeWebApiFetcher {
             if let Some(email) = &acc.email_address {
                 snapshot = snapshot.with_email(email.clone());
             }
-            if let Some(tier) = &acc.rate_limit_tier {
-                snapshot = snapshot.with_login_method(super::claude_plan_label(tier));
+            if let Some(label) = acc
+                .rate_limit_tier
+                .as_deref()
+                .and_then(super::claude_plan_label)
+            {
+                snapshot = snapshot.with_login_method(label);
             }
         }
 
@@ -850,7 +854,7 @@ impl ClaudeWebApiFetcher {
     }
 
     /// Convert rate limit tier to plan name
-    fn tier_to_plan_name(tier: &str) -> String {
+    fn tier_to_plan_name(tier: &str) -> Option<String> {
         super::claude_plan_label(tier)
     }
 }
@@ -1053,12 +1057,38 @@ mod tests {
     fn labels_max_5x_and_20x_plans() {
         assert_eq!(
             ClaudeWebApiFetcher::tier_to_plan_name("default_claude_max_5x"),
-            "Claude Max 5x"
+            Some("Claude Max 5x".to_string())
         );
         assert_eq!(
             ClaudeWebApiFetcher::tier_to_plan_name("v2_default_claude_max_20x"),
-            "Claude Max 20x"
+            Some("Claude Max 20x".to_string())
         );
+    }
+
+    #[test]
+    fn tier_ids_map_to_known_branded_plans_without_inventing_unknown_tiers() {
+        let label = ClaudeWebApiFetcher::tier_to_plan_name;
+        assert_eq!(label("default_claude_pro").as_deref(), Some("Claude Pro"));
+        assert_eq!(label("pro").as_deref(), Some("Claude Pro"));
+        assert_eq!(label("max").as_deref(), Some("Claude Max"));
+        assert_eq!(label("default_claude_max").as_deref(), Some("Claude Max"));
+        assert_eq!(
+            label("default_claude_max_5").as_deref(),
+            Some("Claude Max 5x")
+        );
+        assert_eq!(
+            label("default_claude_max_20").as_deref(),
+            Some("Claude Max 20x")
+        );
+        assert_eq!(
+            label("default_claude_max_50").as_deref(),
+            Some("Claude Max")
+        );
+        assert_eq!(label("team").as_deref(), Some("Claude Team"));
+        assert_eq!(label("enterprise").as_deref(), Some("Claude Enterprise"));
+        assert_eq!(label("free").as_deref(), Some("Claude Free"));
+        assert_eq!(label("default_claude_ai"), None);
+        assert_eq!(label(""), None);
     }
 
     #[test]
