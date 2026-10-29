@@ -55,7 +55,7 @@ async fn read_usage(executable: std::path::PathBuf) -> Result<CodexAccountUsage,
         .take()
         .ok_or("Codex app server output unavailable")?;
     let mut lines = BufReader::new(output).lines();
-    input.write_all(b"{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"win_codexbar\",\"title\":\"Win CodexBar\",\"version\":\"0.72.0\"}}}\n").await.map_err(|_| "Codex initialization failed")?;
+    input.write_all(concat!("{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"win_codexbar\",\"title\":\"Win CodexBar\",\"version\":\"", env!("CARGO_PKG_VERSION"), "\"}}}\n").as_bytes()).await.map_err(|_| "Codex initialization failed")?;
     let initialized = response(&mut lines, 1).await?;
     if initialized.get("result").is_none() {
         return Err("Codex initialization failed".into());
