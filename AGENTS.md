@@ -88,7 +88,7 @@ pnpm run tauri:build
 - Errors: `thiserror` (`ProviderError`) and `anyhow` where already used; keep user-facing messages friendly.
 - Logging: `tracing` only. Never log secrets, cookies, tokens, or raw API keys.
 - Frontend tests are co-located `*.test.ts` / `*.test.tsx`. Bridge types in `types/bridge.ts` must stay aligned with Rust command payloads (including settings tab ids).
-- **Settings tab ids** (case-sensitive; backend whitelist in `surface_target.rs` must mirror frontend `SettingsTabId` / `TAB_META`): `general`, `providers`, `notifications`, `menuBar`, `menu`, `usageSpend`, `mobileConnect`, `advanced`, `hooks`, `about`. Unknown ids fall back to General in the UI. Old ids `display` / `apiKeys` / `cookies` are not valid settings tabs.
+- **Settings tab ids** (case-sensitive; backend whitelist in `surface_target.rs` must mirror frontend `SettingsTabId` / `TAB_META`): `general`, `providers`, `notifications`, `menuBar`, `menu`, `usageSpend`, `mobileConnect`, `discord`, `advanced`, `hooks`, `about`. Unknown ids fall back to General in the UI. Old ids `display` / `apiKeys` / `cookies` are not valid settings tabs.
 - Cookie import UX uses **explicit browser selection** in Preferences — do not assume Chrome-only.
 - Claude CLI output is user-configurable; do not treat a customizable status line as the usage source of truth.
 - Keep provider data siloed: never show identity / plan / email from provider A in provider B UI.
@@ -167,7 +167,7 @@ Then follow post-install instructions (permissions / accessibility as prompted).
 2. **Close** any already-running CodexBar instance (single-instance plugin may hand off to the old process).
 3. **Launch** the new binary. For stable automation (no blur-dismiss), set proof mode, e.g.  
    `$env:CODEXBAR_PROOF_MODE = 'settings:menu'`  
-   (settings tab ids: `general`, `providers`, `notifications`, `menuBar`, `menu`, `usageSpend`, `mobileConnect`, `advanced`, `hooks`, `about` — float bar section is on **`menu`**).
+   (settings tab ids: `general`, `providers`, `notifications`, `menuBar`, `menu`, `usageSpend`, `mobileConnect`, `discord`, `advanced`, `hooks`, `about` — float bar section is on **`menu`**).
    To use CDP, also set `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=<port>'` (one port per parallel lane).
 4. **Drive in the background only** — never `bring_to_front`, foreground mode, `hotkey`, or `type_text`; they take the user's focus or keyboard.
    - **CDP (preferred for webview controls):** read `http://127.0.0.1:<port>/json/list` and attach to the window's own page target by URL — main / tray panel / Settings: `http://tauri.localhost/`; float bar: `…?window=floatbar…`. Never the first target: tools that attach to it or open `about:blank` (e.g. browser-use) see a blank page. Click with `Input.dispatchMouseEvent` (does not move the OS cursor or take focus); assert DOM state and the persisted value via the app bridge (`get_settings_snapshot`).
