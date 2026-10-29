@@ -51,6 +51,9 @@ vi.mock("./settings/tabs/MenuBarTab", () => ({
 vi.mock("./settings/tabs/MenuTab", () => ({
   default: () => <div data-testid="tab">menu</div>,
 }));
+vi.mock("./settings/tabs/DiscordTab", () => ({
+  default: () => <div data-testid="tab">discord</div>,
+}));
 vi.mock("./settings/tabs/AdvancedTab", () => ({
   default: () => <div data-testid="tab">advanced</div>,
 }));
@@ -119,6 +122,7 @@ describe("Settings sidebar", () => {
       "general",
       "usageSpend",
       "mobileConnect",
+      "discord",
       "notifications",
       "menuBar",
       "menu",
@@ -126,7 +130,7 @@ describe("Settings sidebar", () => {
       "hooks",
       "about",
     ]);
-    expect(container.querySelectorAll(".settings-sidebar__chip")).toHaveLength(8);
+    expect(container.querySelectorAll(".settings-sidebar__chip")).toHaveLength(9);
     expect(container.querySelector(".settings-sidebar__app-icon")).not.toBeNull();
     expect(providerNames()).toEqual(["codex", "zai", "claude", "cline", "grok"]);
     expect(screen.getByText("SettingsSidebarProvidersOnCount")).toBeInTheDocument();
@@ -142,6 +146,14 @@ describe("Settings sidebar", () => {
     expect(title()).toBe("Claude");
     expect(screen.getByTestId("tab").textContent).toBe("providers:claude");
     expect(row("claude")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens the dedicated Discord pane from the sidebar", async () => {
+    render(<Settings state={state} />);
+    fireEvent.click(screen.getByRole("button", { name: "TabDiscord" }));
+    expect(title()).toBe("TabDiscord");
+    expect(screen.getByTestId("tab")).toHaveTextContent("discord");
+    await waitFor(() => expect(screen.getByText("SettingsSidebarProvidersOnCount")).toBeInTheDocument());
   });
 
   it("filters providers by name or id without changing the selection", () => {
@@ -331,6 +343,12 @@ describe("Settings sidebar", () => {
 });
 
 describe("Settings deep links", () => {
+  it("opens Discord directly as its own pane", async () => {
+    render(<Settings state={state} initialTab="discord" />);
+    expect(screen.getByTestId("tab")).toHaveTextContent("discord");
+    expect(title()).toBe("TabDiscord");
+    await waitFor(() => expect(screen.getByText("SettingsSidebarProvidersOnCount")).toBeInTheDocument());
+  });
   it("opens Mobile Connect directly as its own pane", () => {
     render(<Settings state={state} initialTab="mobileConnect" />);
     expect(screen.getByTestId("tab")).toHaveTextContent("mobileConnect");

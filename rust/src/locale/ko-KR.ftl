@@ -1745,6 +1745,7 @@ OpenAiOrgLimitsEmpty = 프로젝트 한도를 찾지 못했습니다.
 OpenAiOrgLimitsScoped = 프로젝트 한도는 조직 전체에 적용됩니다. 불러오려면 프로젝트 ID를 지우세요.
 OpenAiOrgLimitsTruncated = 일부 프로젝트만 확인했습니다.
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the pairing code above to connect a phone or tablet. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 

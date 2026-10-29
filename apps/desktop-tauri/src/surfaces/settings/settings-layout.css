@@ -725,6 +725,7 @@
 .settings-sidebar__chip--teal { background: #40c8e0; }
 .settings-sidebar__chip--purple { background: #bf5af2; }
 .settings-sidebar__chip--orange { background: #ff9f0a; }
+.settings-sidebar__chip--discord { background: #5865f2; }
 
 .settings-sidebar__app-icon {
   width: 20px;

@@ -1759,6 +1759,7 @@ OpenAiOrgLimitsEmpty = プロジェクト上限は見つかりませんでした
 OpenAiOrgLimitsScoped = プロジェクト上限は組織全体に適用されます。読み込むにはプロジェクト ID を空にしてください。
 OpenAiOrgLimitsTruncated = 一部のプロジェクトのみ確認しました。
 TabMobileConnect = モバイル接続
+TabDiscord = Discord
 MobileSharingPending = 共有は有効ですが、待ち受けを開始できていません
 MobileSharingListeningHelp = 上のコードをコピーしてスマホ・タブレット・PCを接続できます。待機中はこのPCが接続を受け付ける状態で、端末の接続完了を示すものではありません。アドレスを変えると待受を再起動しますが、鍵は変更しません。
 

@@ -194,6 +194,7 @@ locale_keys! {
     // Tab names (Preferences)
     TabGeneral,
     TabMobileConnect,
+    TabDiscord,
     MobileSharingPending,
     MobileSharingListeningHelp,
     MobileSharingRemoteSettings,

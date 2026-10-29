@@ -7,6 +7,7 @@
 export const ALL_LOCALE_KEYS = [
   "TabGeneral",
   "TabMobileConnect",
+  "TabDiscord",
   "MobileSharingPending",
   "MobileSharingListeningHelp",
   "MobileSharingRemoteSettings",
