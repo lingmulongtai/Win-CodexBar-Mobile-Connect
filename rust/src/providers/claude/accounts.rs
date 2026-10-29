@@ -239,8 +239,13 @@ impl AccountManager {
             "expiresAt",
             "scopes",
             "rateLimitTier",
+            "subscriptionType",
         ] {
-            if let Some(value) = refreshed_oauth.get(key).filter(|value| !value.is_null()) {
+            if let Some(value) = refreshed_oauth.get(key).filter(|value| {
+                !value.is_null()
+                    && (key != "subscriptionType"
+                        || value.as_str().is_some_and(|plan| !plan.trim().is_empty()))
+            }) {
                 saved_oauth.insert(key.to_string(), value.clone());
             }
         }
@@ -467,6 +472,7 @@ mod tests {
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
                 scopes: vec!["user:profile".into()],
                 rate_limit_tier: None,
+                subscription_type: None,
             },
             Some(&manager),
             Some("two:org"),
@@ -477,6 +483,23 @@ mod tests {
             manager.usage_credentials("two:org").unwrap().0["refreshToken"],
             "new-refresh-two"
         );
+        assert_eq!(
+            manager.usage_credentials("two:org").unwrap().0["subscriptionType"],
+            "max"
+        );
+        manager.update_saved_oauth("two:org", &json!({
+            "accessToken": "new-two", "refreshToken": "new-refresh-two", "subscriptionType": "pro"
+        })).unwrap();
+        assert_eq!(
+            manager.usage_credentials("two:org").unwrap().0["subscriptionType"],
+            "pro"
+        );
+        manager.update_saved_oauth("two:org", &json!({"accessToken":"new-two", "refreshToken":"new-refresh-two", "subscriptionType":""})).unwrap();
+        assert_eq!(
+            manager.usage_credentials("two:org").unwrap().0["subscriptionType"],
+            "pro"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
         assert!(manager.usage_credentials("missing:org").is_err());
     }
 
