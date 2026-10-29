@@ -94,6 +94,24 @@ fn assert_cost(source: &ImportedSpendSource, expected: f64) {
     assert_eq!(source.coverage.unpriced, 0);
 }
 
+#[test]
+fn mixed_priced_and_unsupported_rows_keep_a_partial_model_cost() {
+    let priced_row = row("openai", "gpt-fixture");
+    let mut unsupported_row = row("openai", "gpt-fixture");
+    unsupported_row.request_id = "unsupported".to_string();
+    unsupported_row.usage_status = "unsupported".to_string();
+    let source = priced(
+        vec![priced_row, unsupported_row],
+        &CustomPricing::default(),
+        &catalog(),
+    );
+
+    assert_eq!(source.coverage.unmetered, 1);
+    assert_eq!(source.models[0].cost_usd, None);
+    assert_eq!(source.models[0].partial_cost_usd, source.known_cost_usd);
+    assert!(source.models[0].partial_cost_usd.is_some());
+}
+
 fn assert_unpriced(source: &ImportedSpendSource) {
     assert_eq!(source.known_cost_usd, None);
     assert_eq!(source.daily[0].cost_usd, None);
