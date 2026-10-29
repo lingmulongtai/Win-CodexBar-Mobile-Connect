@@ -36,7 +36,7 @@ pub(super) fn load(cache: &mut CostUsageCache, roots: &[PathBuf], base: &Path) {
 }
 
 fn load_one(cache: &mut CostUsageCache, roots: &[PathBuf], path: &Path) {
-    if fs::metadata(&path).is_ok_and(|m| m.len() > 8 * 1024 * 1024) {
+    if fs::metadata(path).is_ok_and(|m| m.len() > 8 * 1024 * 1024) {
         return;
     }
     let Ok(bytes) = fs::read(path) else { return };
