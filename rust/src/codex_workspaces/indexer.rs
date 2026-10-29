@@ -565,7 +565,11 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         model_tokens.insert(model, 0);
     }
 
-    let (started_at, latest_activity) = file_activity_bounds(path, &day_models);
+    let token_times = [
+        parsed.first_token_timestamp.as_deref(),
+        parsed.last_token_timestamp.as_deref(),
+    ];
+    let (started_at, latest_activity) = file_activity_bounds(path, &day_models, token_times);
 
     Some(ParsedFile {
         session_id,
@@ -752,10 +756,24 @@ fn normalize_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Token-event timestamps give the real activity window. Without them the
+/// window falls back to the usage day keys, with the end capped at the file's
+/// mtime so a day key never reports activity later than the file was written.
 fn file_activity_bounds(
     path: &Path,
     day_models: &HashMap<String, HashMap<String, (u64, u64, u64)>>,
+    token_times: [Option<&str>; 2],
 ) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+    let stamps: Vec<DateTime<Utc>> = token_times
+        .into_iter()
+        .flatten()
+        .filter_map(|s| DateTime::parse_from_rfc3339(s.trim()).ok())
+        .map(|d| d.with_timezone(&Utc))
+        .collect();
+    if let (Some(first), Some(last)) = (stamps.iter().min(), stamps.iter().max()) {
+        return (Some(*first), Some(*last));
+    }
+
     let mut earliest: Option<NaiveDate> = None;
     let mut latest: Option<NaiveDate> = None;
     for day in day_models.keys() {
@@ -770,13 +788,17 @@ fn file_activity_bounds(
     let mut end = latest
         .and_then(|d| d.and_hms_opt(23, 59, 59))
         .map(|n| Utc.from_utc_datetime(&n));
-    if end.is_none()
-        && let Ok(meta) = fs::metadata(path)
+    if let Ok(meta) = fs::metadata(path)
         && let Ok(modified) = meta.modified()
     {
-        end = Some(DateTime::<Utc>::from(modified));
+        let modified = DateTime::<Utc>::from(modified);
+        end = Some(end.map_or(modified, |e| e.min(modified)));
     }
-    (started.or(end), end)
+    let started = match (started, end) {
+        (Some(s), Some(e)) => Some(s.min(e)),
+        (s, e) => s.or(e),
+    };
+    (started, end)
 }
 
 fn meta_day_out_of_range(path: &Path, range: &CostUsageDayRange) -> bool {
@@ -811,7 +833,7 @@ mod tests {
     use crate::codex_workspaces::types::SourceStatus;
     use chrono::Local;
     use rusqlite::Connection;
-    use std::fs::File;
+    use std::fs::{File, OpenOptions};
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -1032,6 +1054,52 @@ mod tests {
             msg.contains("incompatible") || msg.contains("user_version"),
             "unexpected error: {msg}"
         );
+    }
+
+    #[test]
+    fn session_activity_uses_token_event_times() {
+        let tmp = TempDir::new().unwrap();
+        let sessions = tmp.path().join("sessions");
+        write_session(
+            &sessions,
+            "2026-03-04",
+            "sess-times.jsonl",
+            &tmp.path().to_string_lossy(),
+            "gpt-5",
+            10,
+            5,
+        );
+        let path = sessions.join("2026/03/04/sess-times.jsonl");
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(
+            file,
+            r#"{{"timestamp":"2026-03-04T10:00:03.000Z","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5}}}}}}}}"#
+        )
+        .unwrap();
+        drop(file);
+        let range = CostUsageDayRange::new(
+            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        );
+        let parsed = index_one_file(&path, &range).expect("parsed");
+        let first = Utc.with_ymd_and_hms(2026, 3, 4, 10, 0, 2).unwrap();
+        let last = Utc.with_ymd_and_hms(2026, 3, 4, 10, 0, 3).unwrap();
+        assert_eq!(parsed.started_at, Some(first));
+        assert_eq!(parsed.latest_activity, Some(last));
+    }
+
+    #[test]
+    fn day_key_activity_never_ends_after_the_file_was_written() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("rollout.jsonl");
+        File::create(&path).unwrap();
+        let modified = DateTime::<Utc>::from(fs::metadata(&path).unwrap().modified().unwrap());
+        let today = modified.date_naive().format("%Y-%m-%d").to_string();
+        let day_models = HashMap::from([(today, HashMap::new())]);
+
+        let (started, latest) = file_activity_bounds(&path, &day_models, [None, None]);
+        assert_eq!(latest, Some(modified));
+        assert!(started.unwrap() <= modified);
     }
 
     #[test]
