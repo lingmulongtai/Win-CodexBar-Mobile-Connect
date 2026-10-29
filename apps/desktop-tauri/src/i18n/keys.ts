@@ -7,6 +7,7 @@
 export const ALL_LOCALE_KEYS = [
   "TabGeneral",
   "TabMobileConnect",
+  "TabDiscord",
   "MobileSharingPending",
   "MobileSharingListeningHelp",
   "MobileSharingRemoteSettings",
@@ -704,6 +705,8 @@ export const ALL_LOCALE_KEYS = [
   "UsageSpendTrendNoData",
   "UsageSpendTrendHourlySummary",
   "UsageSpendPartialModelBreakdown",
+  "DiscordPresenceLabel",
+  "DiscordPresenceHelper",
   "AgentSessionsTitle",
   "AgentSessionsEnableLabel",
   "AgentSessionsEnableHelper",

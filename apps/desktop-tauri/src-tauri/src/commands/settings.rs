@@ -66,6 +66,7 @@ pub struct SettingsUpdate {
     /// Extra Gemini profile homes scanned for Antigravity local history.
     pub antigravity_additional_profile_homes: Option<Vec<String>>,
     pub agent_sessions_enabled: Option<bool>,
+    pub discord_presence_enabled: Option<bool>,
     pub stay_awake_enabled: Option<bool>,
     pub agent_session_ssh_hosts: Option<Vec<String>>,
     pub hooks_enabled: Option<bool>,
@@ -532,6 +533,9 @@ impl SettingsUpdate {
         if let Some(v) = self.agent_sessions_enabled {
             settings.agent_sessions_enabled = v;
         }
+        if let Some(v) = self.discord_presence_enabled {
+            settings.discord_presence_enabled = v;
+        }
         if let Some(v) = self.stay_awake_enabled {
             settings.stay_awake_enabled = v;
         }
@@ -795,6 +799,7 @@ pub(crate) fn update_settings_checked(
     let rebuild_tray_menu = patch.rebuilds_tray_menu();
     let refresh_tray_presentation = patch.refreshes_tray_presentation();
     let stay_awake_changed = patch.stay_awake_enabled.is_some();
+    let discord_presence_changed = patch.discord_presence_enabled.is_some();
     let tray_promotion_changed = patch.changes_tray_promotion();
     let tray_panel_always_on_top_changed = patch.tray_panel_always_on_top.is_some();
     let previous_promoted = settings.promote_tray_icon;
@@ -807,6 +812,11 @@ pub(crate) fn update_settings_checked(
     let float_bar_patch = patch.apply_to(&mut settings)?;
 
     settings.save().map_err(|e| e.to_string())?;
+    // Publish under the settings write lock so concurrent windows cannot
+    // deliver an older value after a newer persisted value.
+    if discord_presence_changed {
+        crate::discord_presence::settings_changed(settings.discord_presence_enabled);
+    }
     drop(write_guard);
     if settings.ui_language != previous_language {
         let _ = app.emit(events::LOCALE_CHANGED, language_label(settings.ui_language));

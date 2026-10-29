@@ -1761,6 +1761,7 @@ OpenAiOrgLimitsEmpty = No project caps were found.
 OpenAiOrgLimitsScoped = Project caps apply to the whole organization. Clear the project ID to load them.
 OpenAiOrgLimitsTruncated = Only some projects were checked.
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the connection code above to connect a phone, tablet or PC. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 
@@ -1786,3 +1787,6 @@ QuotaArchiveThirtyDays = 30 days
 NativeFeatureWindowsOnly = This native integration is currently available on Windows only.
 
 MacManualUpdatesHelper = Download the Mac DMG from this app’s Releases page, quit the app, and replace it in Applications.
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = Shows a persistent Discord status, including the service, model, effort, speed, session elapsed time and local token totals when available. Project names, paths and conversations are not shared. Token data requires cost tracking; detection is approximate.

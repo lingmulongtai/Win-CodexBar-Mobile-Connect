@@ -71,6 +71,8 @@ Downloaded public Windows v0.72.0 EXE, isolated synthetic profiles; the images d
 
 ## Connect
 
+For an optional persistent Discord status with local Codex, Claude Code or Pi/OMP activity, model and token information, see the [Discord Rich Presence guide](docs/discord-rich-presence.md). It is off by default and does not share conversations, project names or paths.
+
 1. Connect and enable the desired providers on Windows.
 2. In the updated app, open **Settings → Mobile Connect** (published v0.70.6 and older: **Advanced → Android sharing**). Select **Tailscale (no exit node)** or **LAN**, then enable sharing. Default TCP port: **43825**.
 3. Copy the private pairing code into Android **Connections → Usage source & Windows connection**, then connect. Pairing selects Windows mode.

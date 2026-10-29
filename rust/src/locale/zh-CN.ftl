@@ -1746,6 +1746,7 @@ OpenAiOrgLimitsEmpty = 未找到项目上限。
 OpenAiOrgLimitsScoped = 项目上限适用于整个组织。请先清空项目 ID 再加载。
 OpenAiOrgLimitsTruncated = 仅检查了部分项目。
 TabMobileConnect = Mobile Connect
+TabDiscord = Discord
 MobileSharingPending = Sharing enabled, listener unavailable
 MobileSharingListeningHelp = Copy the pairing code above to connect a phone or tablet. Listening means this PC is ready; it does not confirm a device connection. Address changes restart the listener without changing existing pairing keys.
 
@@ -1784,3 +1785,6 @@ DesktopPeerEmpty = 尚未保存电脑。
 DesktopPeerDataHelp = 用量、历史和费用来自所选电脑，采用该电脑的统计周期和时区。不共享项目及会话详情。登录和采集设置仅应用于本机；选择本机可查看本地数据。
 NativeFeatureWindowsOnly = 此原生集成功能目前仅支持Windows。
 MacManualUpdatesHelper = 从本应用的发布页面下载Mac DMG，退出应用，然后替换Applications中的应用。
+
+DiscordPresenceLabel = Discord Rich Presence
+DiscordPresenceHelper = 应用运行期间持续显示 Discord 状态，并在可用时共享服务、模型、推理强度、速度、会话经过时间和本机令牌总数。不会共享项目名称、路径或对话。令牌显示需要成本跟踪，检测结果为估算。

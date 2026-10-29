@@ -1128,6 +1128,39 @@ where
     result
 }
 
+/// Count tokens in one complete Claude transcript using the same request
+/// deduplication and preliminary-usage rules as the usage dashboard.
+pub(crate) fn claude_presence_tokens(path: &Path) -> Option<u64> {
+    let mut total = Some(0_u64);
+    let mut pricing = ClaudeScanPricingResolver::default();
+    let mut incomplete = ClaudeIncompleteTracker::default();
+    let mut seen = HashSet::new();
+    let result = scan_claude_file_with_pricing(
+        path,
+        &DateTime::<Utc>::MIN_UTC,
+        &mut seen,
+        None,
+        &mut pricing,
+        &mut incomplete,
+        |record| {
+            total = total.and_then(|value| {
+                value
+                    .checked_add(record.input)?
+                    .checked_add(record.output)?
+                    .checked_add(record.cache_create)?
+                    .checked_add(record.cache_read)
+            });
+        },
+    );
+    (result.malformed_lines == 0
+        && result.read_failures == 0
+        && result.aggregation_failures == 0
+        && incomplete.resolve(&seen).total == 0
+        && result.counted > 0)
+        .then_some(total)
+        .flatten()
+}
+
 /// Walk JSONL text lines from `reader`, including a final incomplete line at EOF.
 /// Continues past invalid UTF-8 segments. `on_line` returns `false` to stop early.
 fn for_each_jsonl_text_line<R, F>(mut reader: R, mut on_line: F) -> ClaudeJsonlLineResult
@@ -1729,6 +1762,10 @@ fn scan_claude_file_for_daily_tokens(
             }
         },
     );
+    // Preliminary message-start rows are superseded by completed rows with
+    // the same request key. They must not make an otherwise complete token
+    // history permanently appear unavailable.
+    result.incomplete_requests = incomplete.resolve(seen).total;
     result.aggregation_failures = result
         .aggregation_failures
         .saturating_add(aggregation_failures);

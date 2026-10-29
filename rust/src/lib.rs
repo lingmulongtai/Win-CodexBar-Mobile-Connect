@@ -17,6 +17,7 @@ pub mod core;
 pub mod cost_reporting_period;
 pub mod cost_scanner;
 pub mod currency;
+pub mod discord_presence;
 pub mod host;
 pub mod locale;
 pub mod logging;

@@ -48,6 +48,13 @@ function Glyph({ children }: { children: ReactNode }) {
 }
 
 const PANE_GLYPHS: Record<Exclude<SettingsTabId, "providers" | "about">, ReactElement> = {
+  discord: (
+    <Glyph>
+      <path d="M4.5 4.5 3 5.5 2 11l2.5 1.5 1-1M11.5 4.5 13 5.5 14 11l-2.5 1.5-1-1M4.5 4.5c2.3-1 4.7-1 7 0M5.5 11.5c1.6.6 3.4.6 5 0" />
+      <circle cx="6" cy="8" r=".6" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="8" r=".6" fill="currentColor" stroke="none" />
+    </Glyph>
+  ),
   mobileConnect: (
     <Glyph><rect x="4" y="1" width="8" height="14" rx="2" /><path d="M7 12h2M6 4h4" /></Glyph>
   ),
