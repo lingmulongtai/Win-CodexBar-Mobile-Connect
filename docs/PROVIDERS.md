@@ -36,6 +36,10 @@ Same vocabulary as upstream, implemented in Rust:
 
 CLI: `codexbar usage --source auto|web|cli|oauth`.
 
+For Codex Free responses that report a fixed 30-day allowance, pace uses the
+reported 43,200-minute window. Shorter session and weekly windows keep their
+existing pace calculation; the fixed window is not inferred as a calendar month.
+
 Auth resolution helpers in `rust/src/providers/` commonly try: explicit settings → keyring/entry → environment variables (exact order is provider-specific).
 
 ### Devin manual authentication
