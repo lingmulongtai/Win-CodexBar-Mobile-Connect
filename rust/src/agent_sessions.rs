@@ -460,6 +460,12 @@ impl LocalAgentSessionScanner {
             ),
         };
 
+        let (processes, error) = presence_process_fallback(
+            include_claude_files,
+            processes,
+            error,
+            native_processes::snapshot_for_presence,
+        );
         let now = Utc::now();
         let codex_root = Self::codex_sessions_root();
         let claude_roots = Self::claude_projects_roots();
@@ -1056,6 +1062,26 @@ impl LocalAgentSessionScanner {
         }
         transcripts
     }
+}
+
+/// Only presence can use the lightweight snapshot as a recovery path; keep
+/// the original diagnostic so callers can still see the CIM failure.
+fn presence_process_fallback(
+    is_presence: bool,
+    processes: Vec<AgentProcessRecord>,
+    error: Option<String>,
+    snapshot: impl FnOnce() -> Result<Vec<AgentProcessRecord>, String>,
+) -> (Vec<AgentProcessRecord>, Option<String>) {
+    if is_presence
+        && error.is_some()
+        && let Ok(fallback) = snapshot()
+    {
+        return (
+            fallback,
+            error.map(|message| format!("{message} A native process snapshot was used.")),
+        );
+    }
+    (processes, error)
 }
 
 impl AgentSessionDiscovery {
