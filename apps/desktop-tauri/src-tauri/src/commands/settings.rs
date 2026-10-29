@@ -2,6 +2,45 @@ use super::*;
 
 // ── Settings mutation ─────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiscordOptionsPatch {
+    priority: Option<String>,
+    format: Option<String>,
+    show_model: Option<bool>,
+    show_mode: Option<bool>,
+    show_elapsed: Option<bool>,
+    show_session_tokens: Option<bool>,
+    show_today: Option<bool>,
+    show_week: Option<bool>,
+    show_month: Option<bool>,
+    show_github: Option<bool>,
+    github_url: Option<String>,
+    show_emoji: Option<bool>,
+    image_url: Option<String>,
+}
+
+impl DiscordOptionsPatch {
+    fn apply(self, target: &mut codexbar::settings::DiscordPresenceOptions) {
+        macro_rules! apply_fields { ($($field:ident),*) => { $(if let Some(value) = self.$field { target.$field = value; })* }; }
+        apply_fields!(
+            priority,
+            format,
+            show_model,
+            show_mode,
+            show_elapsed,
+            show_session_tokens,
+            show_today,
+            show_week,
+            show_month,
+            show_github,
+            github_url,
+            show_emoji,
+            image_url
+        );
+    }
+}
+
 /// Partial settings update — every field is optional so the frontend can
 /// send only what changed.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -67,6 +106,7 @@ pub struct SettingsUpdate {
     pub antigravity_additional_profile_homes: Option<Vec<String>>,
     pub agent_sessions_enabled: Option<bool>,
     pub discord_presence_enabled: Option<bool>,
+    pub discord_presence_options: Option<DiscordOptionsPatch>,
     pub stay_awake_enabled: Option<bool>,
     pub agent_session_ssh_hosts: Option<Vec<String>>,
     pub hooks_enabled: Option<bool>,
@@ -536,6 +576,9 @@ impl SettingsUpdate {
         if let Some(v) = self.discord_presence_enabled {
             settings.discord_presence_enabled = v;
         }
+        if let Some(ref v) = self.discord_presence_options {
+            v.clone().apply(&mut settings.discord_presence_options);
+        }
         if let Some(v) = self.stay_awake_enabled {
             settings.stay_awake_enabled = v;
         }
@@ -799,7 +842,8 @@ pub(crate) fn update_settings_checked(
     let rebuild_tray_menu = patch.rebuilds_tray_menu();
     let refresh_tray_presentation = patch.refreshes_tray_presentation();
     let stay_awake_changed = patch.stay_awake_enabled.is_some();
-    let discord_presence_changed = patch.discord_presence_enabled.is_some();
+    let discord_presence_changed =
+        patch.discord_presence_enabled.is_some() || patch.discord_presence_options.is_some();
     let tray_promotion_changed = patch.changes_tray_promotion();
     let tray_panel_always_on_top_changed = patch.tray_panel_always_on_top.is_some();
     let previous_promoted = settings.promote_tray_icon;
@@ -888,6 +932,20 @@ pub(crate) fn update_settings_checked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discord_option_patches_preserve_unrelated_choices() {
+        let mut settings = Settings::default();
+        let first: SettingsUpdate =
+            serde_json::from_str(r#"{"discordPresenceOptions":{"priority":"claude"}}"#).unwrap();
+        let second: SettingsUpdate =
+            serde_json::from_str(r#"{"discordPresenceOptions":{"showModel":false}}"#).unwrap();
+        first.apply_to(&mut settings).unwrap();
+        second.apply_to(&mut settings).unwrap();
+        assert_eq!(settings.discord_presence_options.priority, "claude");
+        assert!(!settings.discord_presence_options.show_model);
+        assert!(settings.discord_presence_options.show_week);
+    }
 
     #[test]
     fn preferred_currency_patch_accepts_supported_codes_and_rejects_unknown_codes() {

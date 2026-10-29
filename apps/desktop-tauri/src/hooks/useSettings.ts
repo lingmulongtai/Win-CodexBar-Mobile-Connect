@@ -25,6 +25,9 @@ function applyPatch(current: SettingsSnapshot, patch: SettingsUpdate): SettingsS
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined && key in current && !NOT_OPTIMISTIC.has(key)) next[key] = value;
   }
+  if (patch.discordPresenceOptions) {
+    next.discordPresenceOptions = { ...current.discordPresenceOptions, ...patch.discordPresenceOptions };
+  }
   // Accent colors are sent as a per-provider merge patch (`null` clears one
   // provider), not as the full map.
   if (patch.providerAccentColors) {
