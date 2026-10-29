@@ -2,7 +2,9 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::SystemTime,
 };
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -14,6 +16,46 @@ use crate::{
 };
 
 const MAX_TRANSCRIPT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_CLAUDE_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
+
+struct ClaudeTokenCache {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+    tokens: Option<u64>,
+}
+static CLAUDE_TOKEN_CACHE: OnceLock<Mutex<Option<ClaudeTokenCache>>> = OnceLock::new();
+
+fn claude_tokens(path: &Path) -> Option<u64> {
+    let before = path.metadata().ok()?;
+    let len = before.len();
+    let modified = before.modified().ok()?;
+    if len > MAX_CLAUDE_TRANSCRIPT_BYTES {
+        return None;
+    }
+    let cache = CLAUDE_TOKEN_CACHE.get_or_init(|| Mutex::new(None));
+    {
+        let entry = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = entry
+            .as_ref()
+            .filter(|e| e.path == path && e.len == len && e.modified == modified)
+        {
+            return entry.tokens;
+        }
+    }
+    let tokens = crate::cost_scanner::claude_presence_tokens(path);
+    let after = path.metadata().ok()?;
+    if after.len() != len || after.modified().ok()? != modified {
+        return None;
+    }
+    *cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(ClaudeTokenCache {
+        path: path.to_path_buf(),
+        len,
+        modified,
+        tokens,
+    });
+    tokens
+}
 const METADATA_PREFIX_BYTES: u64 = 256 * 1024;
 const METADATA_TAIL_BYTES: u64 = 512 * 1024;
 
@@ -145,13 +187,13 @@ pub(super) fn read(
         }
         scan_lines(&mut result, &tail, provider, now, false);
     }
-    result.tokens = if !tokens_enabled || size > MAX_TRANSCRIPT_BYTES {
+    result.tokens = if !tokens_enabled {
         None
     } else {
         match provider {
-            AgentSessionProvider::Codex => codex_tokens(path, now),
-            AgentSessionProvider::Claude => crate::cost_scanner::claude_presence_tokens(path),
-            AgentSessionProvider::Pi => None,
+            AgentSessionProvider::Codex if size <= MAX_TRANSCRIPT_BYTES => codex_tokens(path, now),
+            AgentSessionProvider::Claude => claude_tokens(path),
+            _ => None,
         }
     };
     result
@@ -406,6 +448,28 @@ mod tests {
         assert_eq!(result.model.as_deref(), Some("gpt-6.1"));
         assert!(result.started_at.is_some());
         assert!(result.tokens.is_none());
+    }
+
+    #[test]
+    fn large_claude_session_tokens_refresh_when_the_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("claude.jsonl");
+        let padding = "x".repeat(MAX_TRANSCRIPT_BYTES as usize + 1);
+        let row = r#"{"type":"assistant","timestamp":"2026-01-01T01:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":2}}}"#;
+        std::fs::write(
+            &path,
+            format!("{{\"type\":\"user\",\"padding\":\"{padding}\"}}\n{row}\n"),
+        )
+        .unwrap();
+        assert_eq!(claude_tokens(&path), Some(12));
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "{}", row.replace("r1", "r2").replace("m1", "m2")).unwrap();
+        drop(file);
+        assert_eq!(claude_tokens(&path), Some(24));
     }
 
     #[test]
