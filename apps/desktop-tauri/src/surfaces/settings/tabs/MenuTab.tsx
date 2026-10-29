@@ -196,17 +196,6 @@ export default function MenuTab({ settings, set, saving }: TabProps) {
         </Field>
       </SettingsGroup>
 
-      <SettingsGroup title={t("DiscordPresenceLabel")}>
-        <Field label={t("DiscordPresenceLabel")} description={t("DiscordPresenceHelper")}>
-          <Toggle
-            variant="switch"
-            checked={settings.discordPresenceEnabled ?? false}
-            disabled={saving}
-            onChange={(v) => set({ discordPresenceEnabled: v })}
-          />
-        </Field>
-      </SettingsGroup>
-
       <SettingsGroup title={t("AgentSessionsTitle")}>
         <Field
           label={t("AgentSessionsStayAwakeLabel")}

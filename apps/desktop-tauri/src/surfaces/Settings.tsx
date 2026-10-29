@@ -29,6 +29,7 @@ import AboutTab from "./settings/tabs/AboutTab";
 import ProvidersTab from "./settings/tabs/ProvidersTab";
 import UsageSpendTab from "./settings/tabs/UsageSpendTab";
 import MobileSharingSettings from "./settings/tabs/MobileSharingSettings";
+import DiscordTab from "./settings/tabs/DiscordTab";
 
 // Mirrors `SETTINGS_WINDOW_WIDTH` / `SETTINGS_WINDOW_HEIGHT` in src-tauri `surface.rs`
 // (macOS `PreferencesView` 880x620).
@@ -245,6 +246,7 @@ export default function Settings({
               <AdvancedTab settings={settings} set={set} saving={saving} />
             )}
             {activeTab === "mobileConnect" && <MobileSharingSettings />}
+            {activeTab === "discord" && <DiscordTab settings={settings} set={set} saving={saving} />}
             {activeTab === "hooks" && <HooksTab providers={catalog} />}
             {activeTab === "about" && (
               <AboutTab settings={settings} set={set} saving={saving} />

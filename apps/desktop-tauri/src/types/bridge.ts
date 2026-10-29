@@ -10,6 +10,7 @@ export type SettingsTabId =
   | "menu"
   | "usageSpend"
   | "mobileConnect"
+  | "discord"
   | "advanced"
   | "hooks"
   | "about";
