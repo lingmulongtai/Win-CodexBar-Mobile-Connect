@@ -85,7 +85,11 @@ pub(crate) fn row_priced_model(
     let model = priced_model(&row.pricing, row.turn_id.as_deref(), overlay)?;
     let input = u64::try_from(row.input.max(0)).unwrap_or(0);
     if pricing_mode_of_model(&model) == "priority"
-        && !CostUsagePricing::codex_fast_lane_covers(&model, input)
+        && !CostUsagePricing::codex_fast_lane_covers_at_date(
+            &model,
+            input,
+            CostUsageDayRange::parse_day_key(&row.day_key),
+        )
     {
         return Some(model_of_pricing_mode(&model));
     }
