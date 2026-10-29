@@ -264,6 +264,7 @@ pub(super) struct RawSettings {
     agent_sessions_enabled: bool,
     #[serde(default)]
     discord_presence_enabled: bool,
+    discord_presence_options: DiscordPresenceOptions,
     #[serde(default)]
     stay_awake_enabled: bool,
     agent_session_ssh_hosts: Vec<String>,
@@ -435,6 +436,7 @@ impl Default for RawSettings {
             antigravity_additional_profile_homes: s.antigravity_additional_profile_homes,
             agent_sessions_enabled: s.agent_sessions_enabled,
             discord_presence_enabled: s.discord_presence_enabled,
+            discord_presence_options: s.discord_presence_options,
             stay_awake_enabled: s.stay_awake_enabled,
             agent_session_ssh_hosts: s.agent_session_ssh_hosts,
             hooks_enabled: s.hooks_enabled,
@@ -795,6 +797,7 @@ impl From<RawSettings> for Settings {
             antigravity_additional_profile_homes: raw.antigravity_additional_profile_homes,
             agent_sessions_enabled: raw.agent_sessions_enabled,
             discord_presence_enabled: raw.discord_presence_enabled,
+            discord_presence_options: raw.discord_presence_options,
             stay_awake_enabled: raw.stay_awake_enabled,
             agent_session_ssh_hosts: raw.agent_session_ssh_hosts,
             hooks_enabled: raw.hooks_enabled,
