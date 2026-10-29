@@ -3270,7 +3270,7 @@ fn pending_codex_scan_incompatible_root_timezone_or_end_resets_start() {
 }
 
 #[test]
-fn pending_codex_scan_force_rescan_resets_start() {
+fn forced_codex_refresh_resumes_the_same_wide_catch_up() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
     let cache_root = root.path().join("cache");
@@ -3291,10 +3291,14 @@ fn pending_codex_scan_force_rescan_resets_start() {
         .with_sessions_dirs(vec![sessions]);
     let (_, _, forced_cache) = forced.scan_codex_detailed_with_cache(None);
     assert!(forced_cache.codex_scan_incomplete);
+    assert!(forced_cache.files.len() > first_cache.files.len());
     assert_eq!(
         forced_cache.codex_pending_scan_since_key.as_deref(),
-        Some(expected_codex_scan_start(7).as_str())
+        Some(expected_codex_scan_start(30).as_str())
     );
+    let (done, _, completed_cache) = forced.scan_codex_detailed_with_cache(None);
+    assert!(!completed_cache.codex_scan_incomplete);
+    assert_eq!(done.input_tokens, 303);
 }
 
 #[test]

@@ -246,12 +246,7 @@ pub(super) fn scan_codex_detailed_with_cache(
     rebuild_cache_days(&mut cache);
     let source_readable = source_roots_readable(scanner, &cache, sessions_dirs);
     let priority_metadata_key = codex_priority_metadata_key(scanner);
-    let pending_scan = CodexPendingScanContext::new(
-        &cache,
-        &range,
-        sessions_dirs,
-        scanner.options.is_app_driven(),
-    );
+    let pending_scan = CodexPendingScanContext::new(&cache, &range, sessions_dirs);
 
     // A no-progress or source-error catch-up is terminal for background
     // synchronization. Keep the resumable queue and last validated report
