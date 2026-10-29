@@ -1,6 +1,7 @@
 //! Privacy-limited mapping of local coding sessions to Discord activity.
 
 use crate::agent_sessions::{AgentSession, AgentSessionProvider, AgentSessionState};
+use crate::settings::DiscordPresenceOptions;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde_json::{Value, json};
 
@@ -120,10 +121,27 @@ pub fn idle_activity_with_usage(
 }
 
 pub fn current_session(sessions: &[AgentSession], now: DateTime<Utc>) -> Option<&AgentSession> {
+    current_session_with_priority(sessions, now, "recent")
+}
+
+pub fn current_session_with_priority<'a>(
+    sessions: &'a [AgentSession],
+    now: DateTime<Utc>,
+    priority: &str,
+) -> Option<&'a AgentSession> {
     // Scanner output is usually sorted, but callers need not supply that
     // order. Limit stale transcript reads so presence cannot stall the UI.
     let mut candidates: Vec<_> = sessions.iter().collect();
-    candidates.sort_by_key(|session| std::cmp::Reverse(session.activity.last_activity_at));
+    candidates.sort_by_key(|session| {
+        let preferred = matches!(
+            (priority, session.provider),
+            ("codex", AgentSessionProvider::Codex) | ("claude", AgentSessionProvider::Claude)
+        );
+        (
+            std::cmp::Reverse(preferred),
+            std::cmp::Reverse(session.activity.last_activity_at),
+        )
+    });
     let mut stale_reads = 0;
     candidates.into_iter().find(|session| {
         let Some(last) = session.activity.last_activity_at else {
@@ -196,6 +214,22 @@ pub fn activity_for_session(
     tokens_enabled: bool,
     periods: Option<UsagePeriods>,
 ) -> Value {
+    activity_for_session_with_options(
+        session,
+        now,
+        tokens_enabled,
+        periods,
+        &DiscordPresenceOptions::default(),
+    )
+}
+
+pub fn activity_for_session_with_options(
+    session: &AgentSession,
+    now: DateTime<Utc>,
+    tokens_enabled: bool,
+    periods: Option<UsagePeriods>,
+    options: &DiscordPresenceOptions,
+) -> Value {
     let name = match session.provider {
         AgentSessionProvider::Codex => "Codex",
         AgentSessionProvider::Claude => "Claude Code",
@@ -213,14 +247,20 @@ pub fn activity_for_session(
             )
         })
         .unwrap_or_default();
-    let mut details = meta.model.map_or_else(
+    let mut details = meta.model.filter(|_| options.show_model).map_or_else(
         || format!("⚡ Using {name}"),
-        |model| format!("⚡ {name} · {model}"),
+        |model| {
+            if options.format == "compact" {
+                format!("⚡ {name}: {model}")
+            } else {
+                format!("⚡ {name} · {model}")
+            }
+        },
     );
-    if let Some(effort) = meta.effort {
+    if let Some(effort) = meta.effort.filter(|_| options.show_mode) {
         details.push_str(&format!(" ({effort})"));
     }
-    match (session.provider, meta.fast) {
+    match (session.provider, meta.fast.filter(|_| options.show_mode)) {
         (AgentSessionProvider::Codex, Some(true)) => details.push_str(" · 🚀 Fast requested"),
         (AgentSessionProvider::Claude, Some(true)) => details.push_str(" · 🚀 Fast"),
         (_, Some(false)) => details.push_str(" · Standard"),
@@ -233,22 +273,91 @@ pub fn activity_for_session(
         "buttons": [{"label": "View on GitHub", "url": REPOSITORY_URL}]
     });
     let mut labels = Vec::new();
-    if let Some(tokens) = meta.tokens {
+    if let Some(tokens) = meta.tokens.filter(|_| options.show_session_tokens) {
         labels.push(format!("S {}", compact_tokens(tokens)));
     }
     if let Some(p) = periods {
-        labels.extend([
-            format!("D {}", compact_tokens(p.today)),
-            format!("W {}", compact_tokens(p.week)),
-            format!("M {}", compact_tokens(p.month)),
-        ]);
+        if options.show_today {
+            labels.push(format!("D {}", compact_tokens(p.today)));
+        }
+        if options.show_week {
+            labels.push(format!("W {}", compact_tokens(p.week)));
+        }
+        if options.show_month {
+            labels.push(format!("M {}", compact_tokens(p.month)));
+        }
     }
     if !labels.is_empty() {
         activity["state"] = json!(format!("📊 {}", labels.join(" · ")));
     }
-    if let Some(start) = meta.started_at {
+    if let Some(start) = meta.started_at.filter(|_| options.show_elapsed) {
         activity["timestamps"] = json!({"start": start.timestamp()});
     }
+    apply_presentation(&mut activity, options);
+    activity
+}
+
+/// Apply the same privacy and appearance choices to active and idle activity.
+pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions) {
+    if !options.show_github
+        && let Some(object) = activity.as_object_mut()
+    {
+        object.remove("buttons");
+    }
+    if !options.show_emoji {
+        for key in ["details", "state"] {
+            if let Some(text) = activity[key].as_str() {
+                let cleaned = text
+                    .replace("⚡ ", "")
+                    .replace("💤 ", "")
+                    .replace("📊 ", "")
+                    .replace("🚀 ", "");
+                activity[key] = json!(cleaned);
+            }
+        }
+    }
+    if options.format == "compact" {
+        if let Some(details) = activity["details"].as_str() {
+            activity["details"] = json!(details.replace("Using ", ""));
+        }
+    }
+    // Only public HTTPS URLs may be sent to Discord. Never transmit local paths,
+    // credentials, fragments, or a malformed value as an image reference.
+    let url = options.image_url.trim();
+    if url.len() <= 512
+        && let Ok(parsed) = reqwest::Url::parse(url)
+        && parsed.scheme() == "https"
+        && parsed.host_str().is_some()
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.fragment().is_none()
+    {
+        activity["assets"]["large_image"] = json!(url);
+    }
+}
+
+pub fn idle_activity_with_options(
+    provider: Option<AgentSessionProvider>,
+    periods: Option<UsagePeriods>,
+    options: &DiscordPresenceOptions,
+) -> Value {
+    let mut activity = idle_activity_with_usage(provider, None);
+    let mut labels = Vec::new();
+    if let Some(p) = periods {
+        if options.show_today {
+            labels.push(format!("D {}", compact_tokens(p.today)));
+        }
+        if options.show_week {
+            labels.push(format!("W {}", compact_tokens(p.week)));
+        }
+        if options.show_month {
+            labels.push(format!("M {}", compact_tokens(p.month)));
+        }
+    }
+    if !labels.is_empty() {
+        activity["state"] = json!(format!("📊 {}", labels.join(" · ")));
+    }
+    apply_presentation(&mut activity, options);
     activity
 }
 
@@ -280,6 +389,112 @@ mod tests {
             },
             focus_target: AgentSessionFocusTarget::None,
         }
+    }
+
+    #[test]
+    fn preferred_provider_wins_only_when_it_is_eligible() {
+        let now = Utc::now();
+        let mut codex = session(AgentSessionProvider::Codex, now);
+        codex.activity.last_activity_at = Some(now - Duration::seconds(30));
+        let claude = session(AgentSessionProvider::Claude, now);
+        let sessions = vec![codex.clone(), claude.clone()];
+        assert_eq!(
+            current_session_with_priority(&sessions, now, "codex")
+                .unwrap()
+                .provider,
+            AgentSessionProvider::Codex
+        );
+        assert_eq!(
+            current_session_with_priority(&sessions, now, "recent")
+                .unwrap()
+                .provider,
+            AgentSessionProvider::Claude
+        );
+        codex.state = AgentSessionState::Idle;
+        codex.transcript_path = None;
+        let sessions = vec![codex, claude];
+        assert_eq!(
+            current_session_with_priority(&sessions, now, "codex")
+                .unwrap()
+                .provider,
+            AgentSessionProvider::Claude
+        );
+    }
+
+    #[test]
+    fn idle_preferences_hide_selected_fields_and_reject_local_image_paths() {
+        let options = DiscordPresenceOptions {
+            show_today: false,
+            show_week: true,
+            show_month: false,
+            show_github: false,
+            show_emoji: false,
+            image_url: "C:/private/pet.gif".into(),
+            ..Default::default()
+        };
+        let activity = idle_activity_with_options(
+            Some(AgentSessionProvider::Codex),
+            Some(UsagePeriods {
+                today: 1,
+                week: 2,
+                month: 3,
+            }),
+            &options,
+        );
+        assert_eq!(activity["details"], "Codex · idle");
+        assert_eq!(activity["state"], "W 2");
+        assert!(activity.get("buttons").is_none());
+        assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+    }
+
+    #[test]
+    fn active_customization_hides_selected_metadata_and_changes_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        std::fs::write(&path, concat!(
+            "{\"type\":\"session_meta\",\"timestamp\":\"2026-01-01T01:00:00Z\",\"payload\":{\"id\":\"s\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-6.1\",\"reasoning_effort\":\"high\",\"service_tier\":\"priority\"}}}\n"
+        )).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut s = session(AgentSessionProvider::Codex, now);
+        s.transcript_path = Some(path.to_string_lossy().to_string());
+        let mut options = DiscordPresenceOptions {
+            format: "compact".into(),
+            show_mode: false,
+            show_elapsed: false,
+            show_emoji: false,
+            image_url: "https://example.com/pet.gif".into(),
+            ..Default::default()
+        };
+        let activity = activity_for_session_with_options(&s, now, false, None, &options);
+        assert_eq!(activity["details"], "Codex: gpt-6.1");
+        assert!(activity.get("timestamps").is_none());
+        assert_eq!(
+            activity["assets"]["large_image"],
+            "https://example.com/pet.gif"
+        );
+        options.show_model = false;
+        options.image_url = "https://secret@example.com/pet.gif".into();
+        let activity = activity_for_session_with_options(&s, now, false, None, &options);
+        assert_eq!(activity["details"], "Codex");
+        assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+    }
+
+    #[test]
+    fn presence_preferences_round_trip_and_are_local_only() {
+        let mut settings: crate::settings::Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            settings.discord_presence_options,
+            DiscordPresenceOptions::default()
+        );
+        settings.discord_presence_options.priority = "claude".into();
+        let saved = serde_json::to_string(&settings).unwrap();
+        let restored: crate::settings::Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored.discord_presence_options.priority, "claude");
+        let portable = crate::settings::PreferencesDocument::from_settings(&settings).unwrap();
+        assert!(!portable.to_json().contains("discord_presence_options"));
     }
 
     #[test]

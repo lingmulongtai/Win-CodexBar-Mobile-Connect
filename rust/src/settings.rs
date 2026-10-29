@@ -107,6 +107,43 @@ impl LowPowerModePreference {
     }
 }
 
+/// Local Discord activity preferences. Missing fields retain the original display.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiscordPresenceOptions {
+    pub priority: String,
+    pub format: String,
+    pub show_model: bool,
+    pub show_mode: bool,
+    pub show_elapsed: bool,
+    pub show_session_tokens: bool,
+    pub show_today: bool,
+    pub show_week: bool,
+    pub show_month: bool,
+    pub show_github: bool,
+    pub show_emoji: bool,
+    pub image_url: String,
+}
+
+impl Default for DiscordPresenceOptions {
+    fn default() -> Self {
+        Self {
+            priority: "recent".into(),
+            format: "detailed".into(),
+            show_model: true,
+            show_mode: true,
+            show_elapsed: true,
+            show_session_tokens: true,
+            show_today: true,
+            show_week: true,
+            show_month: true,
+            show_github: true,
+            show_emoji: true,
+            image_url: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(from = "RawSettings", default)]
 pub struct Settings {
@@ -345,6 +382,10 @@ pub struct Settings {
     /// Opt-in local Discord activity; never included in portable preferences.
     #[serde(default)]
     pub discord_presence_enabled: bool,
+
+    /// Local-only presentation preferences.
+    #[serde(default)]
+    pub discord_presence_options: DiscordPresenceOptions,
 
     /// Keep the system awake (no idle sleep) while a local agent session is live.
     #[serde(default)]
@@ -806,6 +847,7 @@ impl Default for Settings {
             antigravity_additional_profile_homes: Vec::new(),
             agent_sessions_enabled: false,
             discord_presence_enabled: false,
+            discord_presence_options: DiscordPresenceOptions::default(),
             stay_awake_enabled: false,
             agent_session_ssh_hosts: Vec::new(),
             hooks_enabled: false,
