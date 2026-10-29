@@ -606,6 +606,8 @@ export interface UsageSpendRow {
   daily?: UsageSpendDailyPoint[];
   /** F8: true when served from stale cache while a re-scan is in progress. */
   refreshing?: boolean;
+  /** Local history catch-up is paused instead of actively updating. */
+  historyPaused?: boolean;
   /** ISO 8601 timestamp of the stale snapshot when refreshing. */
   staleUpdatedAt?: string;
 }

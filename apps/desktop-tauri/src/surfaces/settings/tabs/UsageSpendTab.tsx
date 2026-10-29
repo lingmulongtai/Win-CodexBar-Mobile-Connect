@@ -69,6 +69,8 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
 
   const [summary, setSummary] = useState<UsageSpendSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [view, setView] = useState<BreakdownView>("providers");
@@ -82,6 +84,7 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
     }
     const request = ++requestRef.current;
     activeRequestRef.current = request;
+    setUpdating(true);
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -90,12 +93,21 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
       const data = await getUsageSpendSummary({ period, forceRefresh });
       if (request !== requestRef.current) return;
       setSummary(data);
+      if (silent && data.rows.some((row) => row.refreshing && !row.historyPaused)) {
+        setRetryGeneration((generation) => generation + 1);
+      } else {
+        setRetryGeneration(0);
+      }
       if (silent) setError(null);
     } catch (err: unknown) {
-      if (!silent && request === requestRef.current) setError(err instanceof Error ? err.message : String(err));
+      if (request === requestRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+        if (silent) setRetryGeneration((generation) => generation + 1);
+      }
     } finally {
       if (request === requestRef.current) {
         activeRequestRef.current = null;
+        setUpdating(false);
         setLoading(false);
         if (refreshQueuedRef.current) {
           refreshQueuedRef.current = false;
@@ -115,6 +127,14 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
       refreshQueuedRef.current = false;
     };
   }, [load]);
+
+  useEffect(() => {
+    if (!summary?.costTrackingEnabled) return;
+    const pending = summary.rows.some((row) => row.refreshing && !row.historyPaused);
+    const delay = pending ? Math.min(10_000 * 2 ** Math.min(retryGeneration, 4), 120_000) : 300_000;
+    const timer = setTimeout(() => void load(false, true), delay);
+    return () => clearTimeout(timer);
+  }, [load, summary, retryGeneration]);
 
   // Upstream 0.55.0 #3106 parity: provider token/cost publications refresh the
   // pane silently while it is open. A settings save (Track costs, OpenCodex)
@@ -216,12 +236,14 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
         <button
           type="button"
           className="credential-btn credential-btn--secondary usage-spend__refresh"
-          disabled={loading || !trackCosts}
+          disabled={updating || !trackCosts}
           onClick={() => void load(true)}
         >
-          <span aria-hidden="true">↻</span> {loading ? t("UsageSpendLoading") : t("UsageSpendRefresh")}
+          <span aria-hidden="true" className={updating ? "spin" : undefined}>↻</span> {updating ? t("UsageSpendLoading") : t("UsageSpendRefresh")}
         </button>
       </div>
+
+      {updating && summary && <p className="settings-section__caption" role="status">{t("UsageSpendRefreshing")}</p>}
 
       <DesktopPeerBanner status={peer} />
       {isRemote && <p className="settings-section__caption">{t("DesktopPeerDataHelp")}</p>}

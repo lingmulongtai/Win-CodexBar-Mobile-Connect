@@ -19,6 +19,7 @@ use super::ProviderUsageSnapshot;
 use crate::state::AppState;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +61,9 @@ pub struct UsageSpendRow {
     /// "refreshing" indicator.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub refreshing: bool,
+    /// Catch-up is blocked and requires attention rather than actively running.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub history_paused: bool,
     /// ISO 8601 timestamp of the stale snapshot (when `refreshing` is true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale_updated_at: Option<String>,
@@ -130,6 +134,7 @@ struct CachedUsageSpendSummary {
     key: String,
     summary: UsageSpendSummary,
     refresh_owner: Option<UsageSpendRefreshOwner>,
+    built_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,13 +198,27 @@ impl UsageSpendCoordinator {
 
     /// The cached summary for `key`, unless the caller forces a rebuild.
     fn reusable(&self, key: &str, force_refresh: bool) -> Option<&CachedUsageSpendSummary> {
-        self.cache
-            .as_ref()
-            .filter(|existing| !force_refresh && existing.key == key)
+        self.cache.as_ref().filter(|existing| {
+            if force_refresh || existing.key != key {
+                return false;
+            }
+            let has_pending = existing
+                .summary
+                .rows
+                .iter()
+                .any(|row| row.refreshing && !row.history_paused);
+            let ttl = if has_pending {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(300)
+            };
+            existing.built_at.elapsed() < ttl
+        })
     }
 }
 
 static USAGE_SPEND_COORDINATOR: OnceLock<Mutex<UsageSpendCoordinator>> = OnceLock::new();
+static USAGE_SPEND_BUILD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn usage_spend_coordinator() -> &'static Mutex<UsageSpendCoordinator> {
     USAGE_SPEND_COORDINATOR.get_or_init(|| Mutex::new(UsageSpendCoordinator::default()))
@@ -208,6 +227,7 @@ fn usage_spend_coordinator() -> &'static Mutex<UsageSpendCoordinator> {
 fn clear_summary_refreshing(summary: &mut UsageSpendSummary) {
     for row in &mut summary.rows {
         row.refreshing = false;
+        row.history_paused = false;
         row.stale_updated_at = None;
     }
 }
@@ -364,6 +384,12 @@ fn build_usage_spend_summary_cached(
     period: CostReportingPeriod,
     force_refresh: bool,
 ) -> Result<BuiltUsageSpendSummary, String> {
+    // Coalesce concurrent local callers before checking the cache. A waiting
+    // caller can reuse the first result instead of starting a second scan.
+    let _build_guard = USAGE_SPEND_BUILD_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|error| error.to_string())?;
     let settings = codexbar::settings::Settings::load();
     let key = usage_spend_cache_key(cached, period, &settings);
     {
@@ -419,6 +445,7 @@ fn build_usage_spend_summary_cached(
         key: key.clone(),
         summary: summary.clone(),
         refresh_owner: refresh_owner.clone(),
+        built_at: Instant::now(),
     });
     Ok(BuiltUsageSpendSummary {
         publication_generation: Some(owner.generation),
@@ -470,7 +497,10 @@ fn usage_spend_cache_key_with_privacy(
                 .unwrap_or_default();
             format!(
                 "{}:{}:{}:{}",
-                snapshot.provider_id, snapshot.updated_at, snapshot.source_label, cost
+                snapshot.provider_id,
+                snapshot.error.is_some(),
+                snapshot.source_label,
+                cost
             )
         })
         .collect();
@@ -559,13 +589,16 @@ fn build_usage_spend_summary(
     });
 
     let codex_stale = !codex_30_summary.history_coverage_established;
-    let codex_stale_updated_at = codex_stale
-        .then(|| {
-            codexbar::core::JsonlScanner::load_cache_status(codexbar::core::ProviderId::Codex, None)
-                .previous_report
-                .and_then(|report| report.updated_at)
-        })
-        .flatten();
+    let codex_status = codex_stale.then(|| {
+        codexbar::core::JsonlScanner::load_cache_status(codexbar::core::ProviderId::Codex, None)
+    });
+    let codex_stale_updated_at = codex_status
+        .as_ref()
+        .and_then(|status| status.previous_report.as_ref())
+        .and_then(|report| report.updated_at.clone());
+    let codex_paused = codex_status
+        .as_ref()
+        .is_some_and(|status| status.codex_scan_pause_reason.is_some());
 
     let codex_7_contract = build_local_spend_totals_from_summary(
         "codex",
@@ -846,6 +879,7 @@ fn build_usage_spend_summary(
             ),
             daily,
             refreshing: spend.refreshing,
+            history_paused: provider_id == "codex" && codex_paused,
             stale_updated_at: spend.stale_updated_at,
         });
     }
@@ -1310,6 +1344,7 @@ mod cache_key_tests {
                 })
                 .collect(),
             refreshing: false,
+            history_paused: false,
             stale_updated_at: None,
         }
     }
@@ -1424,11 +1459,36 @@ mod cache_key_tests {
             key: "day|30".to_string(),
             summary: empty_summary(),
             refresh_owner: None,
+            built_at: Instant::now(),
         });
         // A cached read starts no network work; a forced or new key rebuilds.
         assert!(coordinator.reusable("day|30", false).is_some());
         assert!(coordinator.reusable("day|30", true).is_none());
         assert!(coordinator.reusable("day|7", false).is_none());
+    }
+
+    #[test]
+    fn incomplete_history_expires_so_catch_up_can_continue() {
+        let mut summary = empty_summary();
+        let mut row = trend_row("codex", "USD", &[]);
+        row.refreshing = true;
+        summary.rows.push(row);
+        let mut coordinator = UsageSpendCoordinator::default();
+        coordinator.cache = Some(CachedUsageSpendSummary {
+            generation: 0,
+            key: "day|30".into(),
+            summary,
+            refresh_owner: None,
+            built_at: Instant::now() - Duration::from_secs(11),
+        });
+        assert!(coordinator.reusable("day|30", false).is_none());
+        coordinator.cache.as_mut().unwrap().summary.rows[0].history_paused = true;
+        assert!(coordinator.reusable("day|30", false).is_some());
+        let mut other = trend_row("claude", "USD", &[]);
+        other.refreshing = true;
+        coordinator.cache.as_mut().unwrap().summary.rows.push(other);
+        assert!(coordinator.reusable("day|30", false).is_none());
+        assert!(coordinator.reusable("day|30", true).is_none());
     }
 
     #[test]

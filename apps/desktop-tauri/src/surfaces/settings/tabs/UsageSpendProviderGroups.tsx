@@ -125,7 +125,7 @@ function RowDetail({ row, t }: { row: NonNullable<SpendProviderGroup["row"]>; t:
       {t("UsageSpendCol7d")}: {sevenDay} · {t("UsageSpendCol30d")}: {thirtyDay} · {row.source}
       {row.refreshing && (
         <span title={row.staleUpdatedAt ? `Stale as of ${row.staleUpdatedAt}` : undefined}>
-          {" · "}{t("UsageSpendRefreshing")}
+          {" · "}{t(row.historyPaused ? "UsageSpendPaused" : "UsageSpendPending")}
         </span>
       )}
     </span>

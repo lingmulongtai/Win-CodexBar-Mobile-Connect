@@ -204,6 +204,7 @@ pub(super) fn spend_for(view: &PeerView) -> UsageSpendSummary {
                     })
                     .collect(),
                 refreshing: r.refreshing,
+                history_paused: false,
                 stale_updated_at: (view.error.is_some() || r.refreshing)
                     .then(|| at.map(|at| at.to_rfc3339()))
                     .flatten(),

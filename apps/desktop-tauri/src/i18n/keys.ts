@@ -667,6 +667,8 @@ export const ALL_LOCALE_KEYS = [
   "UsageSpendRefresh",
   "UsageSpendLoading",
   "UsageSpendRefreshing",
+  "UsageSpendPaused",
+  "UsageSpendPending",
   "UsageSpendEmpty",
   "UsageSpendColProvider",
   "UsageSpendCol7d",
