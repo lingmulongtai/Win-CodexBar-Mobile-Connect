@@ -31,6 +31,8 @@ use std::ffi::OsString;
 use std::future::Future;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 #[cfg(windows)]
@@ -529,19 +531,7 @@ impl AntigravityProvider {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| ProviderError::Other(error.to_string()))?;
-        let config = ManagedProcessConfig {
-            program: binary,
-            args: Vec::new(),
-            env: vec![
-                (OsString::from("TERM"), OsString::from("xterm-256color")),
-                (OsString::from("COLORTERM"), OsString::from("truecolor")),
-            ]
-            .into(),
-            cwd: dirs::home_dir().filter(|path| path.is_dir()),
-            pty_rows: 30,
-            pty_cols: 120,
-            label: "agy".to_string(),
-        };
+        let config = managed_agy_config(binary);
         let mut managed = ManagedProcess::spawn(&config)?;
         let pid = managed.pid();
         let process_info = ProcessInfo {
@@ -961,6 +951,25 @@ enum ManagedAgyOutcome {
     Fetched(ProviderFetchResult),
     /// No configured `agy` executable exists, so offline history may be used.
     Missing,
+}
+
+/// Headless PTY session for one managed fetch. It carries the same agy
+/// child environment as the CLI probes, so the session never starts agy's
+/// background auto-updater.
+#[cfg(windows)]
+fn managed_agy_config(binary: PathBuf) -> ManagedProcessConfig {
+    let mut env = cli_fallback::child_environment();
+    env.push((OsString::from("TERM"), OsString::from("xterm-256color")));
+    env.push((OsString::from("COLORTERM"), OsString::from("truecolor")));
+    ManagedProcessConfig {
+        program: binary,
+        args: Vec::new(),
+        env: env.into(),
+        cwd: dirs::home_dir().filter(|path| path.is_dir()),
+        pty_rows: 30,
+        pty_cols: 120,
+        label: "agy".to_string(),
+    }
 }
 
 #[cfg(test)]

@@ -201,6 +201,11 @@ answers first, and offline conversation history is still shown when it
 exists. Unset the variable to restore automatic discovery. Other providers
 keep their own override behavior.
 
+Win-CodexBar sets `AGY_CLI_DISABLE_AUTO_UPDATE=true` for its own `agy` version,
+usage and managed-session processes, and `CODERABBIT_CLI_DISABLE_AUTO_UPDATE=true`
+for its CodeRabbit usage probes. This prevents passive refreshes from starting
+those CLI tools' auto-updaters; it does not change your own CLI sessions or settings.
+
 ## Source mode
 
 CLI `--source` values on this port (see `codexbar usage --help`): `auto`, `web`, `cli`, `oauth`.
