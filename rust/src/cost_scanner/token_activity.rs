@@ -72,7 +72,7 @@ fn codex_activity_scanner(days: u32, shared_cache_root: Option<&Path>) -> CostSc
     });
     let cache_root = shared_cache_root
         .map(Path::to_path_buf)
-        .or_else(JsonlScanner::default_cache_root);
+        .or_else(JsonlScanner::default_codex_cache_root);
     match cache_root {
         Some(root) => scanner.with_cache_root(root.join(CODEX_ACTIVITY_CACHE_DIR)),
         None => scanner,
