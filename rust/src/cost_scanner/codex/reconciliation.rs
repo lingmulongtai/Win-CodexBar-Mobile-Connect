@@ -5,9 +5,12 @@ pub(super) fn paused_codex_summary(
     start_date: NaiveDate,
     today: NaiveDate,
     range: &CostUsageDayRange,
+    compatible_context: bool,
 ) -> CostSummary {
-    if let Some(summary) = codex_current_window_summary(cache, range, start_date, today) {
-        return summary;
+    if compatible_context {
+        if let Some(summary) = codex_current_window_summary(cache, range, start_date, today) {
+            return summary;
+        }
     }
 
     // Without a retained report, rebuild one for the requested days only; the
@@ -91,6 +94,24 @@ pub(super) fn codex_current_window_summary(
     today: NaiveDate,
 ) -> Option<CostSummary> {
     let report = codex_current_window_report(cache, range)?;
+    // Cache entries outside the currently bound roots must never contribute to
+    // a newly published breakdown, even if an older scan left them on disk.
+    let roots: Vec<PathBuf> = cache
+        .codex_pending_scan_root_paths
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let all_in_bound_roots = cache.files.keys().all(|path| {
+        let Ok(path) = fs::canonicalize(path) else {
+            return false;
+        };
+        #[cfg(windows)]
+        let path = PathBuf::from(path.to_string_lossy().to_ascii_lowercase());
+        roots.iter().any(|root| path.starts_with(root))
+    });
+    if !all_in_bound_roots {
+        return None;
+    }
     let mut summary = CostSummary {
         period_start: Some(start_date),
         period_end: Some(today),
@@ -285,6 +306,13 @@ mod tests {
         let old_key = old_path.to_string_lossy().into_owned();
         let current_key = current_path.to_string_lossy().into_owned();
         let mut cache = historical_pending_cache(&old_key, &current_key);
+        let bound_root = std::fs::canonicalize(root.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        #[cfg(windows)]
+        let bound_root = bound_root.to_ascii_lowercase();
+        cache.codex_pending_scan_root_paths = vec![bound_root];
         let metadata = std::fs::metadata(&old_path).unwrap();
         let old_usage = cache.files.get_mut(&old_key).unwrap();
         old_usage.mtime_unix_ms = system_time_to_unix_ms(metadata.modified().ok());
@@ -312,9 +340,15 @@ mod tests {
         assert_eq!(summary.by_model_tokens["gpt-5.6-sol"].input_tokens, 100);
         assert!(summary.total_cost_usd > 0.0);
 
-        let paused = paused_codex_summary(&cache, day, day, &range);
+        let paused = paused_codex_summary(&cache, day, day, &range, true);
         assert_eq!(paused.by_model, summary.by_model);
         assert_eq!(paused.by_model_tokens, summary.by_model_tokens);
+        let incompatible = paused_codex_summary(&cache, day, day, &range, false);
+        assert!(!incompatible.history_coverage_established);
+        assert!(incompatible.by_model.is_empty());
+        cache.codex_pending_scan_root_paths =
+            vec![root.path().join("other-root").to_string_lossy().to_string()];
+        assert!(codex_current_window_summary(&cache, &range, day, day).is_none());
     }
 
     #[test]

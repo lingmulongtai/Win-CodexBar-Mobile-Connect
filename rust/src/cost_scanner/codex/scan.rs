@@ -211,7 +211,13 @@ pub(super) fn scan_codex_detailed_with_cache(
         CodexPendingScanDisposition::before_scan(&cache, scanner.options.is_app_driven()),
         CodexPendingScanDisposition::PreservePause
     ) {
-        let mut summary = paused_codex_summary(&cache, start_date, today, &range);
+        let mut summary = paused_codex_summary(
+            &cache,
+            start_date,
+            today,
+            &range,
+            !pending_scan.is_incompatible,
+        );
         append_pi_compatible_costs(scanner, &mut summary, cancel);
         summary.history_coverage_established =
             summary.history_coverage_established && !is_cancelled(cancel);
