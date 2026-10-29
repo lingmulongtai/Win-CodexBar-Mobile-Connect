@@ -87,10 +87,75 @@ pub async fn resolve(link: &str) -> Result<String, String> {
     poster_from_response(&slug, &value).ok_or_else(|| "pet has no public poster".into())
 }
 
+/// Check the generated GIF before handing its URL to Discord. The fixed
+/// service origin prevents this health check from fetching arbitrary URLs.
+pub async fn animated_image_available(image: &str) -> bool {
+    let Ok(url) = Url::parse(image) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str() != Some("win-codexbar-pet-images.vercel.app")
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/api/pet"
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    let Ok(client) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(6))
+        .build()
+    else {
+        return false;
+    };
+    let Ok(mut response) = client.get(url).send().await else {
+        return false;
+    };
+    if !response.status().is_success()
+        || response
+            .content_length()
+            .is_some_and(|size| size > 4 * 1024 * 1024)
+        || !response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|value| {
+                value
+                    .split(';')
+                    .next()
+                    .is_some_and(|v| v.trim().eq_ignore_ascii_case("image/gif"))
+            })
+    {
+        return false;
+    }
+    let mut prefix = Vec::with_capacity(6);
+    while prefix.len() < 6 {
+        let Ok(Some(chunk)) = response.chunk().await else {
+            return false;
+        };
+        let take = (6 - prefix.len()).min(chunk.len());
+        prefix.extend_from_slice(&chunk[..take]);
+    }
+    is_gif_header(&prefix)
+}
+
+fn is_gif_header(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"GIF89a") || bytes.starts_with(b"GIF87a")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn accepts_only_gif_signatures() {
+        assert!(is_gif_header(b"GIF89a...."));
+        assert!(is_gif_header(b"GIF87a...."));
+        assert!(!is_gif_header(b"<html>"));
+    }
 
     #[test]
     fn accepts_only_site_pet_links() {

@@ -254,12 +254,25 @@ mod windows {
         Some(hasher.finish())
     }
 
+    fn apply_pet_fallback(
+        activity: &mut Value,
+        options: &codexbar::settings::DiscordPresenceOptions,
+        active: bool,
+    ) {
+        activity["assets"]["large_image"] =
+            codexbar::discord_presence::idle_activity()["assets"]["large_image"].clone();
+        let mut fallback = options.clone();
+        fallback.pet_url.clear();
+        codexbar::discord_presence::apply_presentation(activity, &fallback, active);
+    }
+
     async fn run(mut enabled: watch::Receiver<bool>) {
         let mut stream: Option<NamedPipeClient> = None;
         let mut account_lifetime: Option<u64> = None;
         let mut account_task: Option<tokio::task::JoinHandle<Option<u64>>> = None;
         let mut account_refreshed: Option<Instant> = None;
         let mut account_stamp = codex_auth_stamp();
+        let mut pet_health: Option<(String, Instant, bool)> = None;
         let mut last_provider = None;
         let mut clear_before_refresh = false;
         let mut usage = [None, None];
@@ -463,6 +476,39 @@ mod windows {
                     })
                 }) => result.ok().flatten(),
             }.unwrap_or_else(|| codexbar::discord_presence::idle_activity_with_options(selected, periods, &options));
+            if !options.pet_url.is_empty()
+                && let Some(image) = activity["assets"]["large_image"]
+                    .as_str()
+                    .map(str::to_owned)
+                && image.starts_with("https://win-codexbar-pet-images.vercel.app/api/pet?")
+            {
+                let cached = pet_health
+                    .as_ref()
+                    .filter(|(url, checked, ok)| {
+                        url == &image
+                            && checked.elapsed()
+                                < if *ok {
+                                    USAGE_INTERVAL
+                                } else {
+                                    INCOMPLETE_USAGE_RETRY_INTERVAL
+                                }
+                    })
+                    .map(|(_, _, ok)| *ok);
+                let available = if let Some(ok) = cached {
+                    ok
+                } else {
+                    let ok = tokio::select! {
+                        biased;
+                        changed = enabled.changed() => { if changed.is_err() { break; } clear_before_refresh = true; continue; },
+                        result = codexbar::discord_presence::pet_links::animated_image_available(&image) => result,
+                    };
+                    pet_health = Some((image, Instant::now(), ok));
+                    ok
+                };
+                if !available {
+                    apply_pet_fallback(&mut activity, &options, has_session);
+                }
+            }
             // An auth file replacement invalidates any account value gathered
             // before the current activity is sent.
             if account_stamp != codex_auth_stamp() {
@@ -525,6 +571,19 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn failed_animation_uses_the_saved_public_poster() {
+            let options = codexbar::settings::DiscordPresenceOptions {
+                pet_url: "https://codex-pets.net/#/pets/cat".into(),
+                image_url: "https://codex-pets.net/assets/pets/cat/poster.webp".into(),
+                ..Default::default()
+            };
+            let mut activity =
+                json!({"assets":{"large_image":"https://example.invalid/animated.gif"}});
+            apply_pet_fallback(&mut activity, &options, true);
+            assert_eq!(activity["assets"]["large_image"], options.image_url);
+        }
 
         #[test]
         fn account_fingerprint_changes_with_credentials_and_missing_is_unavailable() {
