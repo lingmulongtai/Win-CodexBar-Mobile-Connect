@@ -4,7 +4,7 @@
 use chrono::Utc;
 use codexbar::cost_reporting_period::{CostReportingPeriod, CostTimeZone};
 use codexbar::cost_scanner::{
-    CostScanner, TOKEN_ACTIVITY_DAYS, TokenActivityDay, daily_token_activity,
+    CostScanner, CostSummary, TOKEN_ACTIVITY_DAYS, TokenActivityDay, daily_token_activity,
 };
 use codexbar::spend_contract::{
     SpendContract, build_contract_from_period_summary, build_local_spend_contract,
@@ -13,11 +13,11 @@ use codexbar::spend_contract::{
 };
 use codexbar::spend_trend::SpendTrend;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 use super::ProviderUsageSnapshot;
 use crate::state::AppState;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -91,6 +91,8 @@ pub struct UsageSpendSummary {
     pub reporting_period: String,
     pub reporting_day: String,
     pub dashboard_timezone: String,
+    /// UTC time this snapshot was produced; absent if no snapshot exists.
+    pub updated_at: Option<String>,
     /// False when "Track costs" is off: nothing was scanned and the summary
     /// is empty, so the pane shows "Cost tracking is off".
     pub cost_tracking_enabled: bool,
@@ -132,6 +134,7 @@ fn token_activity_sources(
 struct CachedUsageSpendSummary {
     generation: u64,
     key: String,
+    revision: String,
     summary: UsageSpendSummary,
     refresh_owner: Option<UsageSpendRefreshOwner>,
     built_at: Instant,
@@ -152,8 +155,10 @@ struct UsageSpendRefreshOwner {
 #[derive(Default)]
 struct UsageSpendCoordinator {
     next_generation: u64,
+    scope_epoch: u64,
     current: Option<(UsageSpendRefreshOwner, UsageSpendRefreshPhase)>,
-    cache: Option<CachedUsageSpendSummary>,
+    cache: HashMap<String, CachedUsageSpendSummary>,
+    revalidating: HashSet<String>,
 }
 
 impl UsageSpendCoordinator {
@@ -197,9 +202,14 @@ impl UsageSpendCoordinator {
     }
 
     /// The cached summary for `key`, unless the caller forces a rebuild.
-    fn reusable(&self, key: &str, force_refresh: bool) -> Option<&CachedUsageSpendSummary> {
-        self.cache.as_ref().filter(|existing| {
-            if force_refresh || existing.key != key {
+    fn reusable(
+        &self,
+        key: &str,
+        revision: &str,
+        force_refresh: bool,
+    ) -> Option<&CachedUsageSpendSummary> {
+        self.cache.get(key).filter(|existing| {
+            if force_refresh || existing.key != key || existing.revision != revision {
                 return false;
             }
             let has_pending = existing
@@ -236,6 +246,51 @@ fn summary_is_refreshing(summary: &UsageSpendSummary) -> bool {
     summary.rows.iter().any(|row| row.refreshing)
 }
 
+/// Keep the last complete values for providers still being rebuilt while
+/// accepting fresh values for providers whose refresh has finished.
+fn retain_refreshing_rows(
+    summary: &UsageSpendSummary,
+    previous: &UsageSpendSummary,
+) -> UsageSpendSummary {
+    let mut retained = summary.clone();
+    retained.updated_at = previous.updated_at.clone();
+    for row in &mut retained.rows {
+        if row.refreshing
+            && let Some(old) = previous
+                .rows
+                .iter()
+                .find(|old| old.provider_id == row.provider_id)
+        {
+            let (refreshing, paused) = (row.refreshing, row.history_paused);
+            *row = old.clone();
+            row.refreshing = refreshing;
+            row.history_paused = paused;
+        }
+    }
+    for activity in &mut retained.token_activity {
+        if summary
+            .rows
+            .iter()
+            .any(|row| row.provider_id == activity.provider_id && row.refreshing)
+            && let Some(old) = previous
+                .token_activity
+                .iter()
+                .find(|old| old.provider_id == activity.provider_id)
+        {
+            *activity = old.clone();
+        }
+    }
+    if summary
+        .rows
+        .iter()
+        .any(|row| row.provider_id == "codex" && row.refreshing)
+    {
+        retained.contract = previous.contract.clone();
+    }
+    retained.trend = previous.trend.clone();
+    retained
+}
+
 fn mark_refresh_paused_if_codex_scan_paused(
     coordinator: &mut UsageSpendCoordinator,
     owner: &UsageSpendRefreshOwner,
@@ -255,7 +310,7 @@ fn clear_usage_spend_refresh_if_owned(owner: &UsageSpendRefreshOwner) {
     if !coordinator.clear_if_indexing(owner) {
         return;
     }
-    if let Some(existing) = coordinator.cache.as_mut()
+    if let Some(existing) = coordinator.cache.get_mut(&owner.scope)
         && existing.refresh_owner.as_ref() == Some(owner)
     {
         clear_summary_refreshing(&mut existing.summary);
@@ -268,6 +323,100 @@ struct BuiltUsageSpendSummary {
     key: String,
     summary: UsageSpendSummary,
     refresh_owner: Option<UsageSpendRefreshOwner>,
+}
+
+// Compare stable account IDs rather than changing token bytes. When identity
+// is unavailable, fall back to conservative credential-file invalidation.
+fn account_id_marker(fields: &[&str]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    fields.hash(&mut hasher);
+    format!("id:{:x}", hasher.finish())
+}
+
+fn credential_file_marker(path: &std::path::Path) -> String {
+    std::fs::metadata(path)
+        .ok()
+        .map(|metadata| format!("file:{:?}:{}", metadata.modified().ok(), metadata.len()))
+        .unwrap_or_else(|| "missing".to_string())
+}
+
+fn codex_account_marker(home: &std::path::Path) -> String {
+    if let Ok(identity) = codexbar::codex_accounts::load_identity(home)
+        && let (Some(subject), Some(workspace)) = (
+            identity.auth_subject.as_deref(),
+            identity.provider_account_id.as_deref(),
+        )
+    {
+        return account_id_marker(&[subject, workspace]);
+    }
+    credential_file_marker(&home.join("auth.json"))
+}
+
+fn account_file_marker(
+    credential_path: &std::path::Path,
+    identity_path: &std::path::Path,
+    identity_fields: &[&str],
+) -> String {
+    if !credential_path.exists() {
+        return "missing".to_string();
+    }
+    let identity = std::fs::read(identity_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let fields = identity.as_ref().and_then(|value| {
+        identity_fields
+            .iter()
+            .map(|field| value.pointer(field)?.as_str().filter(|id| !id.is_empty()))
+            .collect::<Option<Vec<_>>>()
+    });
+    if let Some(fields) = fields {
+        account_id_marker(&fields)
+    } else {
+        credential_file_marker(credential_path)
+    }
+}
+
+fn account_scope_marker(settings: &codexbar::settings::Settings) -> String {
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(codexbar::codex_accounts::file_locations::ambient_codex_home);
+    let claude = if settings.claude_allow_reading_claude_code_credentials {
+        codexbar::providers::claude::accounts::config_dir()
+            .ok()
+            .map(|p| {
+                let config = if std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty())
+                {
+                    p.join(".claude.json")
+                } else {
+                    p.parent().unwrap_or(&p).join(".claude.json")
+                };
+                account_file_marker(
+                    &p.join(".credentials.json"),
+                    &config,
+                    &[
+                        "/oauthAccount/accountUuid",
+                        "/oauthAccount/organizationUuid",
+                    ],
+                )
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    format!("{}|{}", codex_account_marker(&codex_home), claude)
+}
+
+static LAST_ACCOUNT_SCOPE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+fn observe_account_scope(app: &tauri::AppHandle) {
+    let marker = account_scope_marker(&codexbar::settings::Settings::load());
+    if let Ok(mut previous) = LAST_ACCOUNT_SCOPE.get_or_init(|| Mutex::new(None)).lock() {
+        if previous.as_ref().is_some_and(|old| old != &marker) {
+            invalidate_usage_spend_account_scope(app);
+        }
+        *previous = Some(marker);
+    }
 }
 
 #[tauri::command]
@@ -286,6 +435,61 @@ pub async fn get_usage_spend_summary(
         }
         return Ok(remote.spend_summary());
     }
+    observe_account_scope(&app);
+    if !force_refresh.unwrap_or(false) {
+        let settings = codexbar::settings::Settings::load();
+        if settings.cost_usage_enabled {
+            let selected = CostReportingPeriod::resolve_request(
+                period.as_deref(),
+                settings.cost_reporting_period,
+            );
+            let cached = state
+                .lock()
+                .map_err(|e| e.to_string())?
+                .provider_cache
+                .clone();
+            let key = usage_spend_cache_key(&cached, selected, &settings);
+            let revision = usage_spend_revision(&cached, selected, &settings);
+            let stale = if let Ok(mut coordinator) = usage_spend_coordinator().lock() {
+                if coordinator.reusable(&key, &revision, false).is_none() {
+                    coordinator
+                        .cache
+                        .get(&key)
+                        .map(|entry| entry.summary.clone())
+                        .map(|summary| {
+                            let start = coordinator.revalidating.insert(key.clone());
+                            (summary, start)
+                        })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((mut summary, start)) = stale {
+                for row in &mut summary.rows {
+                    row.refreshing = true;
+                }
+                if start {
+                    let app = app.clone();
+                    let requested = selected.raw();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app.state::<Mutex<AppState>>();
+                        let result =
+                            get_local_usage_spend_summary(state, Some(requested), Some(false))
+                                .await;
+                        if let Ok(mut coordinator) = usage_spend_coordinator().lock() {
+                            coordinator.revalidating.remove(&key);
+                        }
+                        if result.is_ok() {
+                            let _ = app.emit("usage-spend-updated", ());
+                        }
+                    });
+                }
+                return Ok(summary);
+            }
+        }
+    }
     get_local_usage_spend_summary(state, period, force_refresh).await
 }
 
@@ -294,6 +498,11 @@ pub(crate) async fn get_local_usage_spend_summary(
     period: Option<String>,
     force_refresh: Option<bool>,
 ) -> Result<UsageSpendSummary, String> {
+    let initial_marker = account_scope_marker(&codexbar::settings::Settings::load());
+    let epoch = usage_spend_coordinator()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .scope_epoch;
     let cached = {
         let guard = state.lock().map_err(|e| e.to_string())?;
         guard.provider_cache.clone()
@@ -311,8 +520,12 @@ pub(crate) async fn get_local_usage_spend_summary(
     let force_refresh = force_refresh.unwrap_or(false);
     refresh_opencodex_pricing_before_build(&cached, period, force_refresh).await;
     let original_cached = cached.clone();
+    let marker = account_scope_marker(&settings);
+    if initial_marker != marker {
+        return Err("Account changed while updating usage".into());
+    }
     let built = tauri::async_runtime::spawn_blocking(move || {
-        build_usage_spend_summary_cached(&cached, period, force_refresh)
+        build_usage_spend_summary_cached(&cached, period, force_refresh, epoch, &marker)
     })
     .await
     .map_err(|e| format!("usage spend worker failed: {e}"))??;
@@ -342,7 +555,13 @@ pub(crate) async fn get_local_usage_spend_summary(
     // A late build with the same cache key must not overwrite a newer generation.
     // Keep the coordinator lock through publication so begin() cannot race it.
     if let Ok(coordinator) = usage_spend_coordinator().lock()
-        && coordinator.may_publish(built.publication_generation)
+        && (coordinator.may_publish(built.publication_generation)
+            || coordinator.cache.get(&built.key).is_some_and(|entry| {
+                Some(entry.generation) == built.publication_generation
+                    && !coordinator.current.as_ref().is_some_and(|(owner, _)| {
+                        owner.scope == built.key && owner.generation > entry.generation
+                    })
+            }))
     {
         let settings = codexbar::settings::Settings::load();
         if settings.cost_usage_enabled && period == settings.spend_dashboard_period {
@@ -350,6 +569,63 @@ pub(crate) async fn get_local_usage_spend_summary(
         }
     }
     Ok(built.summary)
+}
+
+/// Drop account-scoped snapshots and cancel publication of an older build.
+pub(crate) fn invalidate_usage_spend_account_scope(app: &tauri::AppHandle) {
+    if let Ok(mut coordinator) = usage_spend_coordinator().lock() {
+        coordinator.cache.clear();
+        coordinator.revalidating.clear();
+        coordinator.current = None;
+        coordinator.next_generation = coordinator.next_generation.wrapping_add(1).max(1);
+        coordinator.scope_epoch = coordinator.scope_epoch.wrapping_add(1);
+    }
+    if let Some(scans) = COMMON_SCANS.get()
+        && let Ok(mut scans) = scans.lock()
+    {
+        scans.clear();
+    }
+    let _ = app.emit("usage-spend-scope-changed", ());
+}
+
+/// Keep each common period warm even while the Settings window is closed.
+pub(crate) fn install_usage_spend_background(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        loop {
+            let settings = codexbar::settings::Settings::load();
+            if settings.cost_usage_enabled {
+                let selected = settings.spend_dashboard_period.raw();
+                let mut periods = vec![selected];
+                for value in [
+                    "rolling:7",
+                    "rolling:30",
+                    "rolling:90",
+                    "month-to-date",
+                    "all",
+                ] {
+                    if !periods.iter().any(|period| period == value) {
+                        periods.push(value.to_string());
+                    }
+                }
+                for period in periods {
+                    observe_account_scope(&app);
+                    if !codexbar::settings::Settings::load().cost_usage_enabled {
+                        break;
+                    }
+                    let state = app.state::<Mutex<AppState>>();
+                    if get_local_usage_spend_summary(state, Some(period), Some(false))
+                        .await
+                        .is_ok()
+                    {
+                        let _ = app.emit("usage-spend-updated", ());
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(300)).await;
+        }
+    });
 }
 
 /// Refreshes models.dev prices for the OpenCodex ledger when this request
@@ -365,9 +641,12 @@ async fn refresh_opencodex_pricing_before_build(
         return;
     }
     let key = usage_spend_cache_key(cached, period, &settings);
-    let rebuilds = usage_spend_coordinator()
-        .lock()
-        .is_ok_and(|coordinator| coordinator.reusable(&key, force_refresh).is_none());
+    let revision = usage_spend_revision(cached, period, &settings);
+    let rebuilds = usage_spend_coordinator().lock().is_ok_and(|coordinator| {
+        coordinator
+            .reusable(&key, &revision, force_refresh)
+            .is_none()
+    });
     if rebuilds {
         codexbar::spend_contract::refresh_opencodex_pricing_if_needed().await;
     }
@@ -390,7 +669,26 @@ fn build_usage_spend_summary_cached(
     cached: &[ProviderUsageSnapshot],
     period: CostReportingPeriod,
     force_refresh: bool,
+    epoch: u64,
+    marker: &str,
 ) -> Result<BuiltUsageSpendSummary, String> {
+    let settings = codexbar::settings::Settings::load();
+    let quick_key = usage_spend_cache_key(cached, period, &settings);
+    let revision = usage_spend_revision(cached, period, &settings);
+    if account_scope_marker(&settings) != marker {
+        return Err("Account changed while updating usage".into());
+    }
+    if let Ok(coordinator) = usage_spend_coordinator().lock()
+        && coordinator.scope_epoch == epoch
+        && let Some(existing) = coordinator.reusable(&quick_key, &revision, force_refresh)
+    {
+        return Ok(BuiltUsageSpendSummary {
+            publication_generation: Some(existing.generation),
+            key: existing.key.clone(),
+            summary: existing.summary.clone(),
+            refresh_owner: existing.refresh_owner.clone(),
+        });
+    }
     // Coalesce concurrent local callers before checking the cache. A waiting
     // caller can reuse the first result instead of starting a second scan.
     let _build_guard = USAGE_SPEND_BUILD_LOCK
@@ -398,12 +696,18 @@ fn build_usage_spend_summary_cached(
         .lock()
         .map_err(|error| error.to_string())?;
     let settings = codexbar::settings::Settings::load();
+    if account_scope_marker(&settings) != marker {
+        return Err("Account changed while updating usage".into());
+    }
     let key = usage_spend_cache_key(cached, period, &settings);
     {
         let guard = usage_spend_coordinator()
             .lock()
             .map_err(|error| error.to_string())?;
-        if let Some(existing) = guard.reusable(&key, force_refresh) {
+        if guard.scope_epoch != epoch {
+            return Err("Account changed while updating usage".into());
+        }
+        if let Some(existing) = guard.reusable(&key, &revision, force_refresh) {
             return Ok(BuiltUsageSpendSummary {
                 publication_generation: Some(existing.generation),
                 key: existing.key.clone(),
@@ -416,9 +720,12 @@ fn build_usage_spend_summary_cached(
         let mut coordinator = usage_spend_coordinator()
             .lock()
             .map_err(|error| error.to_string())?;
+        if coordinator.scope_epoch != epoch {
+            return Err("Account changed while updating usage".into());
+        }
         coordinator.begin(key.clone())
     };
-    let summary = build_usage_spend_summary(cached, period, &settings, force_refresh);
+    let summary = build_usage_spend_summary(cached, period, &settings, force_refresh, epoch);
     let refreshing = summary_is_refreshing(&summary);
     let codex_scan_pause_reason =
         codexbar::core::JsonlScanner::load_cache_status(codexbar::core::ProviderId::Codex, None)
@@ -427,6 +734,11 @@ fn build_usage_spend_summary_cached(
     let mut coordinator = usage_spend_coordinator()
         .lock()
         .map_err(|error| error.to_string())?;
+    if coordinator.scope_epoch != epoch
+        || account_scope_marker(&codexbar::settings::Settings::load()) != marker
+    {
+        return Err("Account changed while updating usage".into());
+    }
     mark_refresh_paused_if_codex_scan_paused(
         &mut coordinator,
         &owner,
@@ -443,17 +755,50 @@ fn build_usage_spend_summary_cached(
             refresh_owner: Some(owner),
         });
     }
+    if refreshing && let Some(previous) = coordinator.cache.get(&key) {
+        let previous_summary = retain_refreshing_rows(&summary, &previous.summary);
+        coordinator.cache.insert(
+            key.clone(),
+            CachedUsageSpendSummary {
+                generation: owner.generation,
+                key: key.clone(),
+                revision: revision.clone(),
+                summary: previous_summary.clone(),
+                refresh_owner: Some(owner.clone()),
+                built_at: Instant::now(),
+            },
+        );
+        return Ok(BuiltUsageSpendSummary {
+            publication_generation: Some(owner.generation),
+            key,
+            summary: previous_summary,
+            refresh_owner: Some(owner),
+        });
+    }
     if !refreshing {
         coordinator.clear_if_indexing(&owner);
     }
     let refresh_owner = refreshing.then(|| owner.clone());
-    coordinator.cache = Some(CachedUsageSpendSummary {
-        generation: owner.generation,
-        key: key.clone(),
-        summary: summary.clone(),
-        refresh_owner: refresh_owner.clone(),
-        built_at: Instant::now(),
-    });
+    if coordinator.cache.len() >= 20
+        && let Some(oldest) = coordinator
+            .cache
+            .iter()
+            .min_by_key(|(_, item)| item.built_at)
+            .map(|(key, _)| key.clone())
+    {
+        coordinator.cache.remove(&oldest);
+    }
+    coordinator.cache.insert(
+        key.clone(),
+        CachedUsageSpendSummary {
+            generation: owner.generation,
+            key: key.clone(),
+            revision: revision.clone(),
+            summary: summary.clone(),
+            refresh_owner: refresh_owner.clone(),
+            built_at: Instant::now(),
+        },
+    );
     Ok(BuiltUsageSpendSummary {
         publication_generation: Some(owner.generation),
         key,
@@ -463,21 +808,47 @@ fn build_usage_spend_summary_cached(
 }
 
 fn usage_spend_cache_key(
-    cached: &[ProviderUsageSnapshot],
+    _cached: &[ProviderUsageSnapshot],
     period: CostReportingPeriod,
     settings: &codexbar::settings::Settings,
 ) -> String {
     let base = usage_spend_cache_key_with_privacy(
-        cached,
-        &period.identity(Utc::now(), CostTimeZone::Local),
+        &[],
+        &period.identity(
+            Utc::now(),
+            codexbar::cost_reporting_period::cost_bucket_zone(),
+        ),
         settings.open_codex_usage_logs_enabled,
         settings.hide_native_codex_cost_when_open_codex_present,
         settings.hide_personal_info,
     );
+    let mut providers: Vec<_> = settings.enabled_providers.iter().collect();
+    providers.sort();
     format!(
-        "{}|{:?}",
+        "{}|{:?}|{:?}|{}|{}|{:?}",
         base,
-        codexbar::core::JsonlScanner::default_codex_cache_root()
+        codexbar::core::JsonlScanner::default_codex_cache_root(),
+        settings.codex_custom_sessions_dirs,
+        codexbar::cost_reporting_period::cost_bucket_zone().identifier(),
+        account_scope_marker(settings),
+        providers
+    )
+}
+
+fn usage_spend_revision(
+    cached: &[ProviderUsageSnapshot],
+    period: CostReportingPeriod,
+    settings: &codexbar::settings::Settings,
+) -> String {
+    usage_spend_cache_key_with_privacy(
+        cached,
+        &period.identity(
+            Utc::now(),
+            codexbar::cost_reporting_period::cost_bucket_zone(),
+        ),
+        settings.open_codex_usage_logs_enabled,
+        settings.hide_native_codex_cost_when_open_codex_present,
+        settings.hide_personal_info,
     )
 }
 
@@ -541,11 +912,93 @@ fn trace_spend_stage<T>(stage: &'static str, work: impl FnOnce() -> T) -> T {
     result
 }
 
+#[derive(Clone)]
+struct MemoizedScan {
+    summary: CostSummary,
+    sampled_at: chrono::DateTime<Utc>,
+    stored_at: Instant,
+}
+
+static COMMON_SCANS: OnceLock<Mutex<HashMap<String, MemoizedScan>>> = OnceLock::new();
+
+/// Share provider scans across the five period snapshots in one warm-up cycle.
+fn memoized_scan(
+    key: String,
+    force: bool,
+    scan: impl FnOnce() -> CostSummary,
+) -> (CostSummary, chrono::DateTime<Utc>) {
+    let cache = COMMON_SCANS.get_or_init(|| Mutex::new(HashMap::new()));
+    if !force
+        && let Ok(cache) = cache.lock()
+        && let Some(entry) = cache.get(&key)
+    {
+        let max_age = if entry.summary.history_coverage_established {
+            240
+        } else {
+            10
+        };
+        if entry.stored_at.elapsed() < Duration::from_secs(max_age) {
+            return (entry.summary.clone(), entry.sampled_at);
+        }
+    }
+    let summary = scan();
+    let sampled_at = Utc::now();
+    if let Ok(mut cache) = cache.lock() {
+        if cache.len() >= 30
+            && let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.stored_at)
+                .map(|(key, _)| key.clone())
+        {
+            cache.remove(&oldest);
+        }
+        cache.insert(
+            key,
+            MemoizedScan {
+                summary: summary.clone(),
+                sampled_at,
+                stored_at: Instant::now(),
+            },
+        );
+    }
+    (summary, sampled_at)
+}
+
+/// Expose the known portion of a partially priced Codex window without
+/// presenting it as the complete total.
+fn codex_partial_estimate(
+    contract: &SpendContract,
+) -> Option<codexbar::spend_contract::LocalCostEstimate> {
+    if contract.price_coverage.unpriced == 0 && contract.price_coverage.unmetered == 0 {
+        return None;
+    }
+    let mut saw = false;
+    let model_total: f64 = contract
+        .models
+        .iter()
+        .filter_map(|model| model.cost_usd.or(model.partial_cost_usd))
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .inspect(|_| saw = true)
+        .sum();
+    let known = match (contract.known_cost_usd, saw && model_total.is_finite()) {
+        (Some(total), true) => Some(total.max(model_total)),
+        (Some(total), false) => Some(total),
+        (None, true) => Some(model_total),
+        (None, false) => None,
+    };
+    Some(codexbar::spend_contract::LocalCostEstimate {
+        known_subtotal_usd: known,
+        coverage: contract.price_coverage.clone(),
+        ..Default::default()
+    })
+}
+
 fn build_usage_spend_summary(
     cached: &[ProviderUsageSnapshot],
     period: CostReportingPeriod,
     settings: &codexbar::settings::Settings,
     force_refresh: bool,
+    epoch: u64,
 ) -> UsageSpendSummary {
     let now = Utc::now();
     let period_scan_days = period.scan_days(now);
@@ -568,8 +1021,14 @@ fn build_usage_spend_summary(
     // Any period other than 7d/30d costs one extra scan per provider.
     let (
         (codex_7_summary, codex_30_summary, codex_period_summary, codex_activity),
-        (claude_7_summary, claude_30_summary, claude_period_summary, claude_activity),
-        (pi_7_summary, pi_30_summary, pi_period_summary),
+        (
+            claude_7_summary,
+            claude_30_summary,
+            claude_period_summary,
+            claude_activity,
+            claude_sampled,
+        ),
+        (pi_7_summary, pi_30_summary, pi_period_summary, pi_sampled),
     ) = std::thread::scope(|scope| {
         let codex = scope.spawn(move || {
             let (seven, thirty, selected) = scan_codex_spend_periods(period, |requested| {
@@ -584,27 +1043,54 @@ fn build_usage_spend_summary(
             });
             (seven, thirty, selected, activity)
         });
-        let claude = scope.spawn(|| {
-            let seven = CostScanner::new(7)
-                .scan_claude_with_cancel_and_pi_sessions(None, include_pi_in_native);
-            let thirty = CostScanner::new(30)
-                .scan_claude_with_cancel_and_pi_sessions(None, include_pi_in_native);
-            let selected = selected_period_scan(period, &seven, &thirty, || {
-                CostScanner::for_period(period)
-                    .scan_claude_with_cancel_and_pi_sessions(None, include_pi_in_native)
-            });
+        let common_scope = format!(
+            "{}|{:?}|{}|{}|{}|{}",
+            account_scope_marker(settings),
+            settings.codex_custom_sessions_dirs,
+            codexbar::cost_reporting_period::cost_bucket_zone().date(now),
+            codexbar::cost_reporting_period::cost_bucket_zone().identifier(),
+            include_pi_in_native,
+            epoch
+        );
+        let claude_scope = common_scope.clone();
+        let claude = scope.spawn(move || {
+            let scan = |requested: CostReportingPeriod| {
+                memoized_scan(
+                    format!(
+                        "claude|{}|{}|{:?}",
+                        claude_scope,
+                        requested.raw(),
+                        std::env::var_os("CLAUDE_CONFIG_DIR")
+                    ),
+                    force_refresh,
+                    || {
+                        CostScanner::for_period(requested)
+                            .scan_claude_with_cancel_and_pi_sessions(None, include_pi_in_native)
+                    },
+                )
+            };
+            let seven = scan(CostReportingPeriod::Rolling(7));
+            let thirty = scan(CostReportingPeriod::Rolling(30));
+            let selected = selected_period_scan(period, &seven, &thirty, || scan(period));
+            let sampled = seven.1.min(thirty.1).min(selected.1);
             let activity = trace_spend_stage("claude annual activity", || {
                 daily_token_activity("claude", TOKEN_ACTIVITY_DAYS)
             });
-            (seven, thirty, selected, activity)
+            (seven.0, thirty.0, selected.0, activity, sampled)
         });
-        let pi = scope.spawn(|| {
-            let seven = CostScanner::new(7).scan_pi();
-            let thirty = CostScanner::new(30).scan_pi();
-            let selected = selected_period_scan(period, &seven, &thirty, || {
-                CostScanner::for_period(period).scan_pi()
-            });
-            (seven, thirty, selected)
+        let pi = scope.spawn(move || {
+            let scan = |requested: CostReportingPeriod| {
+                memoized_scan(
+                    format!("pi|{}|{}", common_scope, requested.raw()),
+                    force_refresh,
+                    || CostScanner::for_period(requested).scan_pi(),
+                )
+            };
+            let seven = scan(CostReportingPeriod::Rolling(7));
+            let thirty = scan(CostReportingPeriod::Rolling(30));
+            let selected = selected_period_scan(period, &seven, &thirty, || scan(period));
+            let sampled = seven.1.min(thirty.1).min(selected.1);
+            (seven.0, thirty.0, selected.0, sampled)
         });
         (
             codex.join().expect("Codex spend scan worker panicked"),
@@ -614,7 +1100,9 @@ fn build_usage_spend_summary(
     });
 
     let codex_restored = codex_period_summary.restored_sessions;
-    let codex_stale = !codex_30_summary.history_coverage_established;
+    let codex_stale = !codex_7_summary.history_coverage_established
+        || !codex_30_summary.history_coverage_established
+        || !codex_period_summary.history_coverage_established;
     let codex_status = codex_stale.then(|| {
         codexbar::core::JsonlScanner::load_cache_status(codexbar::core::ProviderId::Codex, None)
     });
@@ -723,28 +1211,46 @@ fn build_usage_spend_summary(
         let mut local_cost_estimates = None;
         let mut token_lower_bounds = (false, false);
         let spend = match provider_id.as_str() {
-            "codex" => SpendValues {
-                seven_day: codex_7_contract.known_cost_usd,
-                thirty_day: codex_30_contract.known_cost_usd,
-                seven_day_tokens: codex_7_contract.token_total,
-                thirty_day_tokens: codex_30_contract.token_total,
-                period_cost: codex_period_contract.known_cost_usd,
-                period_tokens: codex_period_contract.token_total,
-                source: if include_opencodex && !codex_30_contract.imports.is_empty() {
-                    "local logs + OpenCodex".to_string()
-                } else {
-                    format!(
-                        "local logs{} · API list-price estimate",
-                        if codex_restored > 0 {
-                            format!(" + {codex_restored} restored backup sessions")
-                        } else {
-                            String::new()
-                        }
-                    )
-                },
-                refreshing: codex_stale,
-                stale_updated_at: codex_stale_updated_at.clone(),
-            },
+            "codex" => {
+                let seven_estimate = codex_partial_estimate(&codex_7_contract);
+                let thirty_estimate = codex_partial_estimate(&codex_30_contract);
+                if seven_estimate.is_some() || thirty_estimate.is_some() {
+                    local_cost_estimates = Some((
+                        seven_estimate.clone().unwrap_or_default(),
+                        thirty_estimate.clone().unwrap_or_default(),
+                    ));
+                }
+                SpendValues {
+                    seven_day: if seven_estimate.is_some() {
+                        None
+                    } else {
+                        codex_7_contract.known_cost_usd
+                    },
+                    thirty_day: if thirty_estimate.is_some() {
+                        None
+                    } else {
+                        codex_30_contract.known_cost_usd
+                    },
+                    seven_day_tokens: codex_7_contract.token_total,
+                    thirty_day_tokens: codex_30_contract.token_total,
+                    period_cost: codex_period_contract.known_cost_usd,
+                    period_tokens: codex_period_contract.token_total,
+                    source: if include_opencodex && !codex_30_contract.imports.is_empty() {
+                        "local logs + OpenCodex".to_string()
+                    } else {
+                        format!(
+                            "local logs{} · API list-price estimate",
+                            if codex_restored > 0 {
+                                format!(" + {codex_restored} restored backup sessions")
+                            } else {
+                                String::new()
+                            }
+                        )
+                    },
+                    refreshing: codex_stale,
+                    stale_updated_at: codex_stale_updated_at.clone(),
+                }
+            }
             "claude" => SpendValues {
                 seven_day: Some(claude_7_summary.total_cost_usd),
                 thirty_day: Some(claude_30_summary.total_cost_usd),
@@ -920,8 +1426,11 @@ fn build_usage_spend_summary(
     }
 
     let contract = codex_period_contract;
+    let mut updated_at = now.min(claude_sampled).min(pi_sampled);
     let claude_trend = rows.iter().any(|row| row.provider_id == "claude").then(|| {
-        let (daily, hourly) = claude_trend_history(period.sidecar_days(now), now);
+        let (daily, hourly, sampled_at) =
+            claude_trend_history(period.sidecar_days(now), now, force_refresh, epoch);
+        updated_at = updated_at.min(sampled_at);
         (claude_period_summary.known_zero, daily, hourly)
     });
     let trend = build_spend_trend(&rows, &contract, claude_trend, period, now);
@@ -933,6 +1442,7 @@ fn build_usage_spend_summary(
         reporting_period: period.raw(),
         reporting_day,
         dashboard_timezone,
+        updated_at: Some(updated_at.to_rfc3339()),
         cost_tracking_enabled: true,
         token_activity,
         trend: Some(trend),
@@ -950,6 +1460,7 @@ fn cost_tracking_off_summary(period: CostReportingPeriod) -> UsageSpendSummary {
             .format("%Y-%m-%d")
             .to_string(),
         dashboard_timezone: codexbar::core::local_timezone_name(),
+        updated_at: None,
         cost_tracking_enabled: false,
         token_activity: Vec::new(),
         trend: None,
@@ -961,11 +1472,12 @@ type HourlyCosts = Vec<codexbar::cost_scanner::HourlyCostPoint>;
 
 /// Window length, local reporting day, and cost bucket zone of one Claude
 /// trend walk.
-type ClaudeTrendKey = (u32, chrono::NaiveDate, String);
+type ClaudeTrendKey = (u32, chrono::NaiveDate, String, u64);
 
 struct ClaudeTrendMemo {
     key: ClaudeTrendKey,
     stored_at: std::time::Instant,
+    sampled_at: chrono::DateTime<Utc>,
     daily: DailyCosts,
     hourly: HourlyCosts,
 }
@@ -973,10 +1485,15 @@ struct ClaudeTrendMemo {
 /// The Claude trend walk reads every transcript in the window with no
 /// incremental cache, so a complete result is reused for the cost scan
 /// debounce interval instead of re-walking on every summary rebuild.
-fn claude_trend_history(days: u32, now: chrono::DateTime<Utc>) -> (DailyCosts, HourlyCosts) {
+fn claude_trend_history(
+    days: u32,
+    now: chrono::DateTime<Utc>,
+    force: bool,
+    epoch: u64,
+) -> (DailyCosts, HourlyCosts, chrono::DateTime<Utc>) {
     static MEMO: Mutex<Option<ClaudeTrendMemo>> = Mutex::new(None);
     let zone = codexbar::cost_reporting_period::cost_bucket_zone();
-    let key: ClaudeTrendKey = (days, zone.date(now), zone.identifier());
+    let key: ClaudeTrendKey = (days, zone.date(now), zone.identifier(), epoch);
     let ttl = std::time::Duration::from_secs(
         codexbar::core::CostScanOptions::default().refresh_min_interval_secs,
     );
@@ -984,12 +1501,13 @@ fn claude_trend_history(days: u32, now: chrono::DateTime<Utc>) -> (DailyCosts, H
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_ref()
-        .filter(|memo| memo.key == key && memo.stored_at.elapsed() <= ttl)
+        .filter(|memo| !force && memo.key == key && memo.stored_at.elapsed() <= ttl)
     {
-        return (memo.daily.clone(), memo.hourly.clone());
+        return (memo.daily.clone(), memo.hourly.clone(), memo.sampled_at);
     }
     let (daily, hourly, complete) =
         codexbar::cost_scanner::get_claude_daily_and_hourly_cost_history(days);
+    let sampled_at = Utc::now();
     // A partial walk is never reused, so the next rebuild retries it.
     if complete {
         *MEMO
@@ -997,11 +1515,12 @@ fn claude_trend_history(days: u32, now: chrono::DateTime<Utc>) -> (DailyCosts, H
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ClaudeTrendMemo {
             key,
             stored_at: std::time::Instant::now(),
+            sampled_at,
             daily: daily.clone(),
             hourly: hourly.clone(),
         });
     }
-    (daily, hourly)
+    (daily, hourly, sampled_at)
 }
 /// Claude's window known-zero flag with its daily and hourly cost series.
 type ClaudeTrendSeries = (bool, DailyCosts, HourlyCosts);
@@ -1267,6 +1786,83 @@ mod cache_key_tests {
     use super::*;
 
     #[test]
+    fn account_markers_survive_token_rotation_and_detect_account_changes() {
+        let dir = std::env::temp_dir().join(format!("codexbar-scope-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let auth = dir.join("auth.json");
+        std::fs::write(
+            &auth,
+            r#"{"tokens":{"account_id":"account-one","access_token":"old","id_token":"e30.eyJzdWIiOiJ1c2VyLW9uZSJ9.signature"}}"#,
+        )
+        .unwrap();
+        let original = codex_account_marker(&dir);
+        std::fs::write(
+            &auth,
+            r#"{"tokens":{"account_id":"account-one","access_token":"new-token","id_token":"e30.eyJzdWIiOiJ1c2VyLW9uZSJ9.signature"}}"#,
+        )
+        .unwrap();
+        assert_eq!(original, codex_account_marker(&dir));
+        std::fs::write(
+            &auth,
+            r#"{"tokens":{"account_id":"account-two","access_token":"new-token","id_token":"e30.eyJzdWIiOiJ1c2VyLW9uZSJ9.signature"}}"#,
+        )
+        .unwrap();
+        assert_ne!(original, codex_account_marker(&dir));
+        std::fs::write(
+            &auth,
+            r#"{"tokens":{"account_id":"account-one","access_token":"new-token","id_token":"e30.eyJzdWIiOiJ1c2VyLXR3byJ9.signature"}}"#,
+        )
+        .unwrap();
+        assert_ne!(original, codex_account_marker(&dir));
+
+        let config = dir.join(".claude.json");
+        std::fs::write(
+            &config,
+            r#"{"oauthAccount":{"accountUuid":"one","organizationUuid":"org"}}"#,
+        )
+        .unwrap();
+        let claude = account_file_marker(
+            &auth,
+            &config,
+            &[
+                "/oauthAccount/accountUuid",
+                "/oauthAccount/organizationUuid",
+            ],
+        );
+        std::fs::write(&auth, "rotated credentials").unwrap();
+        assert_eq!(
+            claude,
+            account_file_marker(
+                &auth,
+                &config,
+                &[
+                    "/oauthAccount/accountUuid",
+                    "/oauthAccount/organizationUuid"
+                ]
+            )
+        );
+        std::fs::write(
+            &config,
+            r#"{"oauthAccount":{"accountUuid":"one","organizationUuid":"other"}}"#,
+        )
+        .unwrap();
+        assert_ne!(
+            claude,
+            account_file_marker(
+                &auth,
+                &config,
+                &[
+                    "/oauthAccount/accountUuid",
+                    "/oauthAccount/organizationUuid"
+                ]
+            )
+        );
+        std::fs::remove_file(auth).unwrap();
+        std::fs::remove_file(config).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
     fn codex_spend_scans_widest_first_and_reuses_selected_baselines() {
         for (period, expected) in [
             (
@@ -1391,6 +1987,7 @@ mod cache_key_tests {
             },
             reporting_day: "2026-10-01".to_string(),
             dashboard_timezone: "UTC".to_string(),
+            updated_at: None,
             cost_tracking_enabled: true,
             token_activity: Vec::new(),
             trend: None,
@@ -1539,18 +2136,22 @@ mod cache_key_tests {
     #[test]
     fn only_a_summary_rebuild_may_refresh_opencodex_pricing() {
         let mut coordinator = UsageSpendCoordinator::default();
-        assert!(coordinator.reusable("day|30", false).is_none());
-        coordinator.cache = Some(CachedUsageSpendSummary {
-            generation: 0,
-            key: "day|30".to_string(),
-            summary: empty_summary(),
-            refresh_owner: None,
-            built_at: Instant::now(),
-        });
+        assert!(coordinator.reusable("day|30", "r", false).is_none());
+        coordinator.cache.insert(
+            "day|30".into(),
+            CachedUsageSpendSummary {
+                generation: 0,
+                key: "day|30".to_string(),
+                revision: "r".into(),
+                summary: empty_summary(),
+                refresh_owner: None,
+                built_at: Instant::now(),
+            },
+        );
         // A cached read starts no network work; a forced or new key rebuilds.
-        assert!(coordinator.reusable("day|30", false).is_some());
-        assert!(coordinator.reusable("day|30", true).is_none());
-        assert!(coordinator.reusable("day|7", false).is_none());
+        assert!(coordinator.reusable("day|30", "r", false).is_some());
+        assert!(coordinator.reusable("day|30", "r", true).is_none());
+        assert!(coordinator.reusable("day|7", "r", false).is_none());
     }
 
     #[test]
@@ -1560,23 +2161,132 @@ mod cache_key_tests {
         row.refreshing = true;
         summary.rows.push(row);
         let mut coordinator = UsageSpendCoordinator {
-            cache: Some(CachedUsageSpendSummary {
-                generation: 0,
-                key: "day|30".into(),
-                summary,
-                refresh_owner: None,
-                built_at: Instant::now() - Duration::from_secs(11),
-            }),
+            cache: HashMap::from([(
+                "day|30".into(),
+                CachedUsageSpendSummary {
+                    generation: 0,
+                    key: "day|30".into(),
+                    revision: "r".into(),
+                    summary,
+                    refresh_owner: None,
+                    built_at: Instant::now() - Duration::from_secs(11),
+                },
+            )]),
             ..UsageSpendCoordinator::default()
         };
-        assert!(coordinator.reusable("day|30", false).is_none());
-        coordinator.cache.as_mut().unwrap().summary.rows[0].history_paused = true;
-        assert!(coordinator.reusable("day|30", false).is_some());
+        assert!(coordinator.reusable("day|30", "r", false).is_none());
+        coordinator.cache.get_mut("day|30").unwrap().summary.rows[0].history_paused = true;
+        assert!(coordinator.reusable("day|30", "r", false).is_some());
         let mut other = trend_row("claude", "USD", &[]);
         other.refreshing = true;
-        coordinator.cache.as_mut().unwrap().summary.rows.push(other);
-        assert!(coordinator.reusable("day|30", false).is_none());
-        assert!(coordinator.reusable("day|30", true).is_none());
+        coordinator
+            .cache
+            .get_mut("day|30")
+            .unwrap()
+            .summary
+            .rows
+            .push(other);
+        assert!(coordinator.reusable("day|30", "r", false).is_none());
+        assert!(coordinator.reusable("day|30", "r", true).is_none());
+    }
+
+    #[test]
+    fn partial_codex_window_reports_known_subtotal_as_incomplete() {
+        let mut contract = SpendContract::empty("codex", CostReportingPeriod::Rolling(7));
+        contract.known_cost_usd = Some(5.0);
+        contract.price_coverage.unpriced = 1;
+        contract
+            .models
+            .push(codexbar::spend_contract::SpendModelRow {
+                model: "fixture".into(),
+                cost_usd: None,
+                partial_cost_usd: Some(8.0),
+                input_tokens: 1,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                total_tokens: 1,
+                custom_pricing: false,
+            });
+        let estimate = codex_partial_estimate(&contract).unwrap();
+        assert_eq!(estimate.known_subtotal_usd, Some(8.0));
+        assert_eq!(estimate.coverage.unpriced, 1);
+        contract.price_coverage.unpriced = 0;
+        assert!(codex_partial_estimate(&contract).is_none());
+    }
+
+    #[test]
+    fn pending_refresh_retains_old_values_but_keeps_new_status_and_other_providers() {
+        let mut old = empty_summary();
+        old.updated_at = Some("2026-01-01T00:00:00Z".into());
+        let mut codex = trend_row("codex", "USD", &[]);
+        codex.period_cost = Some(10.0);
+        old.rows.push(codex.clone());
+        let mut new = empty_summary();
+        codex.period_cost = Some(1.0);
+        codex.refreshing = true;
+        codex.history_paused = true;
+        new.rows.push(codex);
+        let mut claude = trend_row("claude", "USD", &[]);
+        claude.period_cost = Some(7.0);
+        new.rows.push(claude);
+        let retained = retain_refreshing_rows(&new, &old);
+        assert_eq!(retained.rows[0].period_cost, Some(10.0));
+        assert!(retained.rows[0].refreshing && retained.rows[0].history_paused);
+        assert_eq!(retained.rows[1].period_cost, Some(7.0));
+        assert_eq!(retained.updated_at, old.updated_at);
+    }
+
+    #[test]
+    fn common_scans_reuse_results_and_force_refresh_rebuilds() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let key = format!("fixture-{}", uuid::Uuid::new_v4());
+        let scan = || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            CostSummary {
+                history_coverage_established: true,
+                ..CostSummary::default()
+            }
+        };
+        let first = memoized_scan(key.clone(), false, scan);
+        let second = memoized_scan(key.clone(), false, scan);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(first.1, second.1);
+        memoized_scan(key, true, scan);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn cache_keeps_multiple_periods_independently() {
+        let mut coordinator = UsageSpendCoordinator::default();
+        for key in [
+            "rolling:7",
+            "rolling:30",
+            "rolling:90",
+            "month-to-date",
+            "all",
+        ] {
+            coordinator.cache.insert(
+                key.into(),
+                CachedUsageSpendSummary {
+                    generation: 1,
+                    key: key.into(),
+                    revision: "r".into(),
+                    summary: empty_summary(),
+                    refresh_owner: None,
+                    built_at: Instant::now(),
+                },
+            );
+        }
+        for key in [
+            "rolling:7",
+            "rolling:30",
+            "rolling:90",
+            "month-to-date",
+            "all",
+        ] {
+            assert!(coordinator.reusable(key, "r", false).is_some(), "{key}");
+        }
     }
 
     #[test]
