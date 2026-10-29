@@ -425,6 +425,7 @@ UsageSpendApiEstimate = API liste fiyatı tahmini
 UsageSpendVendorMetered = Sağlayıcı ölçümlü
 UsageSpendMixedSources = Karışık kaynaklar
 UsageSpendUnknown = Bilinmiyor
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = fiyatsız
 UsageSpendHistoryCovered = Kapsanan geçmiş
 UsageSpendCustomPricingActive = Özel fiyatlandırma etkin

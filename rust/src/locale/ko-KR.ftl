@@ -393,6 +393,7 @@ UsageSpendApiEstimate = API 정가 추정
 UsageSpendVendorMetered = 공급업체 측정
 UsageSpendMixedSources = 혼합 출처
 UsageSpendUnknown = 알 수 없음
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = 가격 미지정
 UsageSpendHistoryCovered = 포함된 기록
 UsageSpendCustomPricingActive = 사용자 지정 가격 적용 중

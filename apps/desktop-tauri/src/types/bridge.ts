@@ -711,6 +711,7 @@ export interface SpendTokenMix {
 export interface SpendModelRow {
   model: string;
   costUsd: number | null;
+  partialCostUsd?: number | null;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

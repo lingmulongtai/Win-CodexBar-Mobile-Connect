@@ -393,6 +393,7 @@ UsageSpendApiEstimate = API 标价估算
 UsageSpendVendorMetered = 厂商计量
 UsageSpendMixedSources = 混合来源
 UsageSpendUnknown = 未知
+UsageSpendPartialCost = partial estimate
 UsageSpendUnpriced = 未定价
 UsageSpendHistoryCovered = 已覆盖历史
 UsageSpendCustomPricingActive = 自定义定价已启用

@@ -337,6 +337,7 @@ fn merge_models_combines_duplicate_models_and_sorts_priced_first() {
     let make_row = |model: &str, cost: Option<f64>, input: u64, custom: bool| SpendModelRow {
         model: model.to_string(),
         cost_usd: cost,
+        partial_cost_usd: None,
         input_tokens: input,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -396,6 +397,7 @@ fn resolve_spend_preserves_merged_report_details() {
     let native_models = vec![SpendModelRow {
         model: "gpt-5".to_string(),
         cost_usd: Some(1.0),
+        partial_cost_usd: None,
         input_tokens: 10,
         output_tokens: 2,
         cache_read_tokens: 0,
@@ -425,6 +427,7 @@ fn resolve_spend_preserves_merged_report_details() {
         models: vec![SpendModelRow {
             model: "gpt-5".to_string(),
             cost_usd: Some(2.0),
+            partial_cost_usd: None,
             input_tokens: 5,
             output_tokens: 0,
             cache_read_tokens: 4,
@@ -673,6 +676,7 @@ fn known_subtotal_sums_known_costs_only_and_needs_known_zero_for_empty() {
     let make_row = |cost: Option<f64>| SpendModelRow {
         model: String::new(),
         cost_usd: cost,
+        partial_cost_usd: None,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -695,6 +699,7 @@ fn coverage_for_models_counts_priced_rows_as_estimated() {
     let make_row = |cost: Option<f64>| SpendModelRow {
         model: String::new(),
         cost_usd: cost,
+        partial_cost_usd: None,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -902,4 +907,48 @@ fn imported_window_total_uses_resolved_import_total() {
         None,
         "an import without token data stays unknown"
     );
+}
+
+#[test]
+fn partial_model_pricing_keeps_known_subtotal_and_unpriced_coverage() {
+    let mut summary = CostSummary::default();
+    summary.by_model.insert("gpt-6.1-sol".into(), 12.5);
+    summary.by_model_tokens.insert(
+        "gpt-6.1-sol".into(),
+        ModelTokenCounts {
+            input_tokens: 1_000_000,
+            ..ModelTokenCounts::default()
+        },
+    );
+    summary.model_pricing_completeness = crate::cost_scanner::ModelPricingCompleteness::Partial {
+        unpriced_models: vec!["gpt-6.1-sol".into()],
+    };
+    let rows = model_rows("codex", &summary, &CustomPricing::default());
+    assert_eq!(rows[0].cost_usd, None);
+    assert_eq!(rows[0].partial_cost_usd, Some(12.5));
+    assert_eq!(coverage_for_models(&rows).unpriced, 1);
+    assert_eq!(known_subtotal(&rows, &summary), None);
+    let mut incoming = rows[0].clone();
+    incoming.cost_usd = Some(2.0);
+    incoming.partial_cost_usd = None;
+    let merged = merge_models(rows, &[incoming]);
+    assert_eq!(merged[0].cost_usd, None);
+    assert_eq!(merged[0].partial_cost_usd, Some(14.5));
+}
+
+#[test]
+fn unknown_fallback_rates_never_become_a_known_partial_subtotal() {
+    let mut summary = CostSummary::default();
+    summary.by_model.insert("unknown-model".into(), 99.0);
+    summary.by_model_tokens.insert(
+        "unknown-model".into(),
+        ModelTokenCounts {
+            input_tokens: 100,
+            ..ModelTokenCounts::default()
+        },
+    );
+    summary.unknown_models.insert("unknown-model".into());
+    let rows = model_rows("codex", &summary, &CustomPricing::default());
+    assert_eq!(rows[0].partial_cost_usd, None);
+    assert_eq!(known_subtotal(&rows, &summary), None);
 }

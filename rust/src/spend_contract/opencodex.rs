@@ -306,6 +306,7 @@ fn aggregate_with_pricing(
         .map(|(model, acc)| SpendModelRow {
             model,
             cost_usd: acc.cost,
+            partial_cost_usd: None,
             input_tokens: acc.input,
             output_tokens: acc.output,
             cache_read_tokens: acc.cache_read,

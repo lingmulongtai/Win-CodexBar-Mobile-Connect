@@ -393,6 +393,7 @@ UsageSpendApiEstimate = API 定価ベースの推定
 UsageSpendVendorMetered = ベンダー計測
 UsageSpendMixedSources = 複数ソース混在
 UsageSpendUnknown = 不明
+UsageSpendPartialCost = 一部のみ計算済み
 UsageSpendUnpriced = 価格未設定
 UsageSpendHistoryCovered = 対象履歴
 UsageSpendCustomPricingActive = カスタム価格を適用中
