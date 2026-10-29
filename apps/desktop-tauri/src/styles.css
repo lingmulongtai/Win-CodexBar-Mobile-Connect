@@ -2940,6 +2940,7 @@ body:has(.tray-panel-reveal),
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
   .chart__bar,
   .chart__line,
   .chart__area,

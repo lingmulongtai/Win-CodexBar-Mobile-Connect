@@ -344,7 +344,7 @@ fn cost_row(provider_id: ProviderId, period: CostReportingPeriod) -> Value {
         "days_scanned": days,
         "totals": cost_totals_json(provider_id.cli_name(), &summary),
         "cost": {
-            "total_usd": summary.total_cost_usd,
+            "total_usd": summary.published_cost_usd(provider_id.cli_name()),
             "currency": "USD"
         },
         "daily": daily_json_with_incomplete(daily_cost, &daily_incomplete),

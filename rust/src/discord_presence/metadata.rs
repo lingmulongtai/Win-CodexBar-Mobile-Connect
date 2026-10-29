@@ -60,22 +60,99 @@ fn claude_tokens(path: &Path) -> Option<u64> {
 }
 const METADATA_PREFIX_BYTES: u64 = 256 * 1024;
 const METADATA_TAIL_BYTES: u64 = 512 * 1024;
+const METADATA_SEARCH_BYTES: u64 = 32 * 1024 * 1024;
+
+// Expand backwards only until a complete relevant record is found. Keep a
+// fixed end offset so concurrent appends cannot change the inspected window.
+fn metadata_tail(
+    file: &mut File,
+    size: u64,
+    max_bytes: u64,
+    relevant: impl Fn(&Value) -> bool,
+) -> Option<(Vec<u8>, bool)> {
+    let mut width = METADATA_TAIL_BYTES.min(size);
+    loop {
+        let offset = size.saturating_sub(width);
+        let partial_first = if offset == 0 {
+            false
+        } else {
+            file.seek(SeekFrom::Start(offset - 1)).ok()?;
+            let mut previous = [0_u8; 1];
+            file.read_exact(&mut previous).ok()?;
+            previous[0] != b'\n'
+        };
+        file.seek(SeekFrom::Start(offset)).ok()?;
+        let mut bytes = Vec::new();
+        (&mut *file).take(width).read_to_end(&mut bytes).ok()?;
+        if u64::try_from(bytes.len()).ok()? != width {
+            return None;
+        }
+        let mut lines = bytes.split(|byte| *byte == b'\n');
+        if partial_first {
+            lines.next();
+        }
+        let found = lines.any(|line| {
+            serde_json::from_slice::<Value>(line)
+                .ok()
+                .as_ref()
+                .is_some_and(&relevant)
+        });
+        if found || offset == 0 || width >= max_bytes {
+            return Some((bytes, partial_first));
+        }
+        width = width.saturating_mul(2).min(max_bytes).min(size);
+    }
+}
+
+fn model_record(value: &Value, provider: AgentSessionProvider) -> bool {
+    match (provider, value.get("type").and_then(Value::as_str)) {
+        (AgentSessionProvider::Codex, Some("turn_context")) => {
+            value.pointer("/payload/model").is_some()
+        }
+        (AgentSessionProvider::Codex, Some("event_msg"))
+            if value.pointer("/payload/type").and_then(Value::as_str)
+                == Some("thread_settings_applied") =>
+        {
+            value.pointer("/payload/thread_settings/model").is_some()
+        }
+        (AgentSessionProvider::Claude, Some("assistant")) => {
+            value.pointer("/message/model").is_some()
+        }
+        _ => false,
+    }
+}
 
 /// Read only lifecycle markers from a bounded tail; never return transcript text.
-pub(super) fn codex_open_turn(path: &Path, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+pub(super) fn codex_open_turn(
+    path: &Path,
+    now: DateTime<Utc>,
+    expand: bool,
+) -> Option<DateTime<Utc>> {
     let mut file = File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
-    let offset = size.saturating_sub(METADATA_TAIL_BYTES);
-    file.seek(SeekFrom::Start(offset)).ok()?;
-    let mut tail = Vec::new();
-    file.take(METADATA_TAIL_BYTES).read_to_end(&mut tail).ok()?;
+    let max_bytes = if expand {
+        4 * 1024 * 1024
+    } else {
+        METADATA_TAIL_BYTES
+    };
+    let (tail, partial_first) = metadata_tail(&mut file, size, max_bytes, |value| {
+        value.get("type").and_then(Value::as_str) == Some("event_msg")
+            && match value.pointer("/payload/type").and_then(Value::as_str) {
+                Some("task_started") => true,
+                Some("task_complete" | "turn_aborted") => value
+                    .pointer("/payload/turn_id")
+                    .and_then(Value::as_str)
+                    .is_none(),
+                _ => false,
+            }
+    })?;
     // A partial final line may be a completion event still being written.
     if !tail.ends_with(b"\n") {
         return None;
     }
     let mut lines = tail.split(|byte| *byte == b'\n');
-    if offset != 0 {
-        lines.next(); // The first line may be truncated.
+    if partial_first {
+        lines.next(); // The first line is truncated.
     }
     let mut open: Option<(String, DateTime<Utc>)> = None;
     for line in lines {
@@ -167,27 +244,28 @@ pub(super) fn read(
     {
         return result;
     }
-    let mut tail = Vec::new();
-    if size > METADATA_PREFIX_BYTES
-        && (file
-            .seek(SeekFrom::Start(size.saturating_sub(METADATA_TAIL_BYTES)))
-            .is_err()
-            || (&mut file)
-                .take(METADATA_TAIL_BYTES)
-                .read_to_end(&mut tail)
-                .is_err())
-    {
-        return result;
-    }
     scan_lines(&mut result, &prefix, provider, now, true);
-    if !tail.is_empty() {
-        // Do not misreport an old prefix model when no recent model is found.
-        if size > METADATA_TAIL_BYTES {
-            result.model = None;
-            result.effort = None;
-            result.fast = None;
+    if size > METADATA_PREFIX_BYTES {
+        // Only publish metadata from the latest complete model record; a
+        // prefix value may have been superseded outside the search window.
+        result.model = None;
+        result.effort = None;
+        result.fast = None;
+        if let Some((tail, partial_first)) =
+            metadata_tail(&mut file, size, METADATA_SEARCH_BYTES, |value| {
+                model_record(value, provider)
+            })
+            && tail.ends_with(b"\n")
+        {
+            let complete = if !partial_first {
+                tail.as_slice()
+            } else {
+                tail.iter()
+                    .position(|b| *b == b'\n')
+                    .map_or(&[][..], |i| &tail[i + 1..])
+            };
+            scan_lines(&mut result, complete, provider, now, false);
         }
-        scan_lines(&mut result, &tail, provider, now, false);
     }
     result.tokens = if !tokens_enabled {
         None
@@ -484,6 +562,90 @@ mod tests {
             false,
         );
         assert_eq!(result.fast, None);
+    }
+
+    #[test]
+    fn metadata_tail_keeps_a_complete_line_at_the_search_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("boundary.jsonl");
+        let model = b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-6.1\"}}\n";
+        let mut bytes = b"prefix\n".to_vec();
+        bytes.extend_from_slice(model);
+        let target = usize::try_from(METADATA_TAIL_BYTES).unwrap();
+        bytes.extend(std::iter::repeat_n(b' ', target - model.len() - 1));
+        bytes.push(b'\n');
+        std::fs::write(&path, &bytes).unwrap();
+        let mut file = File::open(&path).unwrap();
+        let (tail, partial) = metadata_tail(
+            &mut file,
+            u64::try_from(bytes.len()).unwrap(),
+            METADATA_TAIL_BYTES,
+            |value| model_record(value, AgentSessionProvider::Codex),
+        )
+        .unwrap();
+        assert!(!partial);
+        assert!(tail.starts_with(model));
+        let now = Utc::now();
+        assert_eq!(
+            read(&path, AgentSessionProvider::Codex, now, false)
+                .model
+                .as_deref(),
+            Some("gpt-6.1")
+        );
+    }
+
+    #[test]
+    fn long_turn_finds_latest_model_and_open_turn_beyond_old_tail_limit() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("long-turn.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let padding = "x".repeat(700_000);
+        writeln!(file, "{{\"type\":\"user\",\"padding\":\"{padding}\"}}").unwrap();
+        writeln!(file, r#"{{"type":"turn_context","payload":{{"model":"gpt-6.1-terra","effort":"high","service_tier":"priority"}}}}"#).unwrap();
+        writeln!(file, r#"{{"type":"event_msg","timestamp":"2026-01-01T01:00:00Z","payload":{{"type":"task_started","turn_id":"t1"}}}}"#).unwrap();
+        writeln!(file, "{{\"type\":\"user\",\"padding\":\"{padding}\"}}").unwrap();
+        writeln!(file, "{{\"type\":\"user\",\"padding\":\"{padding}\"}}").unwrap();
+        drop(file);
+        let now = DateTime::parse_from_rfc3339("2026-01-01T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let result = read(&path, AgentSessionProvider::Codex, now, false);
+        assert_eq!(result.model.as_deref(), Some("gpt-6.1-terra"));
+        assert_eq!(result.effort, Some("High"));
+        assert_eq!(result.fast, Some(true));
+        assert!(codex_open_turn(&path, now, true).is_some());
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"event_msg","payload":{{"type":"task_complete","turn_id":"other"}}}}"#
+        )
+        .unwrap();
+        drop(file);
+        assert!(codex_open_turn(&path, now, true).is_some());
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"turn_context","payload":{{"model":"private/unsafe"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"event_msg","payload":{{"type":"task_complete","turn_id":"t1"}}}}"#
+        )
+        .unwrap();
+        drop(file);
+        let updated = read(&path, AgentSessionProvider::Codex, now, false);
+        assert!(updated.model.is_none());
+        assert!(updated.effort.is_none());
+        assert!(updated.fast.is_none());
+        assert!(codex_open_turn(&path, now, true).is_none());
     }
 
     #[test]

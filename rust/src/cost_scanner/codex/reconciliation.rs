@@ -5,10 +5,11 @@ pub(super) fn paused_codex_summary(
     start_date: NaiveDate,
     today: NaiveDate,
     range: &CostUsageDayRange,
+    compatible_context: bool,
 ) -> CostSummary {
-    if let Some(report) = codex_current_window_report(cache, range) {
-        let mut summary = summary_from_cached_report(&report, start_date, today);
-        summary.history_coverage_established = true;
+    if compatible_context
+        && let Some(summary) = codex_current_window_summary(cache, range, start_date, today)
+    {
         return summary;
     }
 
@@ -81,6 +82,47 @@ pub(super) fn codex_current_window_report(
     (codex_current_window_is_established(cache, range)
         && codex_current_window_has_evidence(cache, range))
     .then(|| JsonlScanner::cached_cost_report_for_range(cache, range))
+}
+
+/// Rebuild the model breakdown from the same validated day map as the
+/// current-window report. A cached report alone has no model rows, so using
+/// it here would silently discard the estimated cost in Usage & Spend.
+pub(super) fn codex_current_window_summary(
+    cache: &CostUsageCache,
+    range: &CostUsageDayRange,
+    start_date: NaiveDate,
+    today: NaiveDate,
+) -> Option<CostSummary> {
+    let report = codex_current_window_report(cache, range)?;
+    // Cache entries outside the currently bound roots must never contribute to
+    // a newly published breakdown, even if an older scan left them on disk.
+    let roots: Vec<PathBuf> = cache
+        .codex_pending_scan_root_paths
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let all_in_bound_roots = cache.files.keys().all(|path| {
+        let Ok(path) = fs::canonicalize(path) else {
+            return false;
+        };
+        #[cfg(windows)]
+        let path = PathBuf::from(path.to_string_lossy().to_ascii_lowercase());
+        roots.iter().any(|root| path.starts_with(root))
+    });
+    if !all_in_bound_roots {
+        return None;
+    }
+    let mut summary = CostSummary {
+        period_start: Some(start_date),
+        period_end: Some(today),
+        sessions_count: u32::try_from(report.sessions_count.max(0)).unwrap_or(0),
+        history_coverage_established: true,
+        ..CostSummary::default()
+    };
+    let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, range);
+    summary.total_cost_usd = cost;
+    price_summary_from_source_rows(&mut summary, cache, range);
+    Some(summary)
 }
 
 fn codex_pending_path_affects_current_window(
@@ -170,6 +212,7 @@ pub(super) fn reconcile_missing_codex_cache_files(
 ) {
     for path in missing_codex_cache_paths(cache, sessions_dirs, range) {
         cache.files.remove(&path);
+        cache.codex_pending_file_ranges.remove(&path);
     }
     cache
         .codex_pending_paths
@@ -265,6 +308,13 @@ mod tests {
         let old_key = old_path.to_string_lossy().into_owned();
         let current_key = current_path.to_string_lossy().into_owned();
         let mut cache = historical_pending_cache(&old_key, &current_key);
+        let bound_root = std::fs::canonicalize(root.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        #[cfg(windows)]
+        let bound_root = bound_root.to_ascii_lowercase();
+        cache.codex_pending_scan_root_paths = vec![bound_root];
         let metadata = std::fs::metadata(&old_path).unwrap();
         let old_usage = cache.files.get_mut(&old_key).unwrap();
         old_usage.mtime_unix_ms = system_time_to_unix_ms(metadata.modified().ok());
@@ -277,6 +327,30 @@ mod tests {
         let report = codex_current_window_report(&cache, &range).unwrap();
         assert_eq!(report.input_tokens, 100);
         assert_eq!(report.sessions_count, 1);
+
+        let day = NaiveDate::from_ymd_opt(2026, 9, 19).unwrap();
+        let summary = codex_current_window_summary(&cache, &range, day, day).unwrap();
+        assert!(summary.history_coverage_established);
+        assert_eq!(summary.input_tokens, 100);
+        assert_eq!(summary.sessions_count, 1);
+        assert!(
+            summary
+                .by_model
+                .get("gpt-5.6-sol")
+                .is_some_and(|cost| *cost > 0.0)
+        );
+        assert_eq!(summary.by_model_tokens["gpt-5.6-sol"].input_tokens, 100);
+        assert!(summary.total_cost_usd > 0.0);
+
+        let paused = paused_codex_summary(&cache, day, day, &range, true);
+        assert_eq!(paused.by_model, summary.by_model);
+        assert_eq!(paused.by_model_tokens, summary.by_model_tokens);
+        let incompatible = paused_codex_summary(&cache, day, day, &range, false);
+        assert!(!incompatible.history_coverage_established);
+        assert!(incompatible.by_model.is_empty());
+        cache.codex_pending_scan_root_paths =
+            vec![root.path().join("other-root").to_string_lossy().to_string()];
+        assert!(codex_current_window_summary(&cache, &range, day, day).is_none());
     }
 
     #[test]

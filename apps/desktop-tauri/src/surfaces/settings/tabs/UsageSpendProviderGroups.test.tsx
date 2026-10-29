@@ -32,6 +32,13 @@ function group(providerId: string, displayName: string, models: SpendModelRow[],
 }
 
 describe("UsageSpendProviderGroups brand rows", () => {
+  it("shows the known partial estimate when the complete model cost is unknown", () => {
+    const partial = { ...model("gpt-6.1-sol"), costUsd: null, partialCostUsd: 12.5 };
+    render(<UsageSpendProviderGroups groups={[group("codex", "Codex", [partial])]} caption="caption" t={t} />);
+    expect(screen.getByText(/\$12.50.*UsageSpendPartialCost/)).not.toBeNull();
+    expect(screen.queryByText("UsageSpendUnpriced")).toBeNull();
+  });
+
   it("shows the brand artwork in the provider heading", () => {
     const { container } = render(
       <UsageSpendProviderGroups groups={[group("claude", "Claude", [model("opus")])]} caption="caption" t={t} showHeading={false} />,

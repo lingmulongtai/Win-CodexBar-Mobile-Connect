@@ -107,7 +107,16 @@ fn project_spend(summary: &UsageSpendSummary, now: i64) -> MobileSpend {
                     refreshing: row.refreshing,
                     seven_day: amount(row.seven_day),
                     thirty_day: amount(row.thirty_day),
-                    period_cost: amount(row.period_cost),
+                    // The current Mobile protocol has no partial-cost flag.
+                    // Do not present an incomplete subtotal as a full amount.
+                    period_cost: if row.provider_id == summary.contract.provider_id
+                        && (summary.contract.price_coverage.unpriced > 0
+                            || summary.contract.price_coverage.unmetered > 0)
+                    {
+                        None
+                    } else {
+                        amount(row.period_cost)
+                    },
                     seven_day_tokens: tokens(row.seven_day_tokens),
                     thirty_day_tokens: tokens(row.thirty_day_tokens),
                     period_tokens: tokens(row.period_tokens),
@@ -121,7 +130,11 @@ fn project_spend(summary: &UsageSpendSummary, now: i64) -> MobileSpend {
         Vec::new()
     };
     MobileSpend {
-        updated_at_epoch_seconds: now,
+        updated_at_epoch_seconds: summary
+            .updated_at
+            .as_deref()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map_or(now, |value| value.timestamp()),
         reporting_period: summary.reporting_period.clone(),
         time_zone: summary.dashboard_timezone.clone(),
         cost_tracking_enabled: summary.cost_tracking_enabled,
@@ -191,6 +204,7 @@ mod tests {
             reporting_period: "rolling:30".into(),
             reporting_day: "2026-10-17".into(),
             dashboard_timezone: "UTC".into(),
+            updated_at: None,
             cost_tracking_enabled: false,
             token_activity: Vec::new(),
             trend: None,
@@ -227,6 +241,7 @@ mod tests {
                 included_in_overview: true,
                 daily: Vec::new(),
                 refreshing: false,
+                history_paused: false,
                 stale_updated_at: None,
             }],
             contract: codexbar::spend_contract::SpendContract::empty(
@@ -236,6 +251,7 @@ mod tests {
             reporting_period: "rolling:30".into(),
             reporting_day: "2026-10-17".into(),
             dashboard_timezone: "UTC".into(),
+            updated_at: None,
             cost_tracking_enabled: true,
             token_activity: vec![TokenActivitySource {
                 provider_id: "codex".into(),
@@ -254,7 +270,19 @@ mod tests {
             }],
             trend: None,
         };
-        let projection = project_spend(&summary, 1_700_000_000);
+        let mut summary = summary;
+        summary.updated_at = Some("2023-11-14T22:13:20Z".into());
+        summary.contract.provider_id = "codex".into();
+        summary.contract.price_coverage.unpriced = 1;
+        summary.rows[0].period_cost = Some(5.0);
+        let projection = project_spend(&summary, 1_700_000_100);
+        assert_eq!(projection.updated_at_epoch_seconds, 1_700_000_000);
+        assert_eq!(projection.rows[0].period_cost, None);
+        summary.contract.price_coverage.unpriced = 0;
+        assert_eq!(
+            project_spend(&summary, 1_700_000_100).rows[0].period_cost,
+            Some(5.0)
+        );
         assert_eq!(projection.rows[0].seven_day, Some(0.0));
         assert_eq!(projection.rows[0].thirty_day, None);
         assert!(projection.rows[0].tokens_lower_bound);

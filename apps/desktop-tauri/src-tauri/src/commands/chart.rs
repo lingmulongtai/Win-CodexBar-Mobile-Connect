@@ -461,9 +461,13 @@ fn local_usage_summary_from_cost_summary(
         || summary.incomplete_request_count > 0;
     has_usage.then(|| ProviderLocalUsageSummary {
         today_cost: today.and_then(|t| t.cost_usd).and_then(non_zero_f64),
-        thirty_day_cost: non_zero_f64(summary.total_cost_usd),
+        thirty_day_cost: summary
+            .published_cost_usd(provider_id)
+            .and_then(non_zero_f64),
         thirty_day_tokens: non_zero_u64(thirty_tokens),
-        period_cost: period_summary.and_then(|s| non_zero_f64(s.total_cost_usd)),
+        period_cost: period_summary
+            .and_then(|s| s.published_cost_usd(provider_id))
+            .and_then(non_zero_f64),
         period_tokens: period_summary.and_then(|s| non_zero_u64(total_tokens(provider_id, s))),
         reporting_period: period.raw(),
         latest_tokens: today.and_then(|t| non_zero_u64(t.tokens)),
@@ -548,12 +552,15 @@ fn load_local_usage_summary_with_unknown_models(
     let lang = locale::current_language();
     (
         Some(ProviderLocalUsageSummary {
-            today_cost: non_zero_f64(today.total_cost_usd),
-            thirty_day_cost: non_zero_f64(thirty_day.total_cost_usd),
+            today_cost: today.published_cost_usd(provider_id).and_then(non_zero_f64),
+            thirty_day_cost: thirty_day
+                .published_cost_usd(provider_id)
+                .and_then(non_zero_f64),
             thirty_day_tokens: non_zero_u64(thirty_day_tokens),
             period_cost: period_summary
                 .as_ref()
-                .and_then(|s| non_zero_f64(s.total_cost_usd)),
+                .and_then(|s| s.published_cost_usd(provider_id))
+                .and_then(non_zero_f64),
             period_tokens: period_summary
                 .as_ref()
                 .and_then(|s| non_zero_u64(total_tokens(provider_id, s))),

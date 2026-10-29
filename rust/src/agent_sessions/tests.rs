@@ -8,6 +8,38 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn presence_uses_native_processes_after_discovery_failure() {
+        let started = Utc::now() - chrono::Duration::minutes(10);
+        let codex = WindowsProcessOutputParser::record(
+            42,
+            1,
+            Some(started),
+            Some("codex.exe".to_string()),
+            None,
+        );
+        let (processes, error) = presence_process_fallback(
+            true,
+            Vec::new(),
+            Some("timed out".to_string()),
+            || Ok(vec![codex]),
+        );
+        assert_eq!(processes[0].provider, Some(AgentSessionProvider::Codex));
+        assert_eq!(processes[0].started_at, Some(started));
+        assert!(error.unwrap().contains("native process snapshot"));
+
+        let (processes, error) = presence_process_fallback(false, Vec::new(), Some("failed".into()), || {
+            panic!("normal agent scans must not use the presence fallback")
+        });
+        assert!(processes.is_empty());
+        assert_eq!(error.as_deref(), Some("failed"));
+
+        let (_, error) = presence_process_fallback(true, Vec::new(), None, || {
+            panic!("successful discovery must not use the fallback")
+        });
+        assert!(error.is_none());
+    }
+
+    #[test]
     fn process_parser_filters_helpers_app_server_duplicates_and_malformed_lines() {
         let output = "\
 101   1 Mon Jul  6 09:00:00 2026 /Applications/Claude.app/Contents/Resources/disclaimer /Users/test/Library/Application Support/Claude/claude-code/claude --dangerously-skip-permissions

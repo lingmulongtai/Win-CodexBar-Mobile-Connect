@@ -228,10 +228,11 @@ impl CodexWorkspacesIndex {
         let mut indexed = 0u32;
         let mut skipped = 0u32;
 
+        let pricing_snapshot = crate::core::pricing_snapshot();
         for (idx, path) in files.iter().enumerate() {
-            match index_one_file(path, &range) {
+            match index_one_file_with_snapshot(path, &range, &pricing_snapshot) {
                 Some(parsed) => {
-                    merge_daily(&mut daily_acc, &parsed.day_models);
+                    merge_daily(&mut daily_acc, &parsed.day_models, &parsed.day_costs);
                     let turns = scan_session_turns(path, &parsed.session_id, &range);
                     session_turns
                         .entry(parsed.session_id.clone())
@@ -334,6 +335,7 @@ struct ParsedFile {
     cost: CostEstimate,
     model_tokens: HashMap<String, u64>,
     day_models: HashMap<String, HashMap<String, (u64, u64, u64)>>,
+    day_costs: HashMap<String, CostEstimate>,
     started_at: Option<DateTime<Utc>>,
     latest_activity: Option<DateTime<Utc>>,
 }
@@ -500,7 +502,16 @@ fn build_projects(sessions: &HashMap<String, SessionBucket>) -> Vec<ProjectUsage
         .collect()
 }
 
+#[cfg(test)]
 fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> {
+    index_one_file_with_snapshot(path, range, &crate::core::pricing_snapshot())
+}
+
+fn index_one_file_with_snapshot(
+    path: &Path,
+    range: &CostUsageDayRange,
+    snapshot: &crate::core::ModelsDevPricingSnapshot,
+) -> Option<ParsedFile> {
     let first_line = CodexRolloutFirstLineParser::read_first_line(path)?;
     let meta = CodexRolloutFirstLineParser::parse(&first_line);
     let (session_id, cwd) = if let Some(meta) = meta {
@@ -530,8 +541,9 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
     let mut cost = CostEstimate::default();
     let mut model_tokens: HashMap<String, u64> = HashMap::new();
     let mut day_models: HashMap<String, HashMap<String, (u64, u64, u64)>> = HashMap::new();
+    let mut day_costs: HashMap<String, CostEstimate> = HashMap::new();
 
-    for (record, _) in &parsed.records {
+    for record in crate::core::rows_from_records(&parsed.records) {
         let input = record.input.max(0) as u64;
         let cached = (record.cached.max(0) as u64).min(input);
         let output = record.output.max(0) as u64;
@@ -550,9 +562,33 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         day_entry.1 = day_entry.1.saturating_add(cached);
         day_entry.2 = day_entry.2.saturating_add(output);
 
-        match codex_cost_on_day(&record.day_key, &model, input, cached, output) {
-            Some(usd) => cost.known_usd += usd,
-            None => cost.unknown_tokens = cost.unknown_tokens.saturating_add(tokens),
+        let daily = day_costs.entry(record.day_key.clone()).or_default();
+        let price = crate::cost_scanner::codex_request_price_supported_with_snapshot(
+            path,
+            &record,
+            &model,
+            Some(snapshot),
+        )
+        .then(|| {
+            codex_cost_on_day_with_snapshot(
+                &record.day_key,
+                &model,
+                input,
+                cached,
+                output,
+                snapshot,
+            )
+        })
+        .flatten();
+        match price {
+            Some(usd) => {
+                cost.known_usd += usd;
+                daily.known_usd += usd;
+            }
+            None => {
+                cost.unknown_tokens = cost.unknown_tokens.saturating_add(tokens);
+                daily.unknown_tokens = daily.unknown_tokens.saturating_add(tokens);
+            }
         }
     }
 
@@ -588,6 +624,7 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         cost,
         model_tokens,
         day_models,
+        day_costs,
         started_at,
         latest_activity,
     })
@@ -596,16 +633,25 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
 fn merge_daily(
     daily: &mut HashMap<String, DailyAcc>,
     day_models: &HashMap<String, HashMap<String, (u64, u64, u64)>>,
+    day_costs: &HashMap<String, CostEstimate>,
 ) {
     for (day, models) in day_models {
         let acc = daily.entry(day.clone()).or_default();
-        for (model, (input, cached, output)) in models {
-            let tokens = input.saturating_add(*output);
-            acc.total_tokens = acc.total_tokens.saturating_add(tokens);
+        for (input, cached, output) in models.values() {
+            acc.total_tokens = acc
+                .total_tokens
+                .saturating_add(input.saturating_add(*output));
             acc.cached_input_tokens = acc.cached_input_tokens.saturating_add(*cached);
-            match codex_cost_on_day(day, model, *input, *cached, *output) {
-                Some(usd) => acc.known_usd += usd,
-                None => acc.unknown_tokens = acc.unknown_tokens.saturating_add(tokens),
+        }
+        if let Some(cost) = day_costs.get(day) {
+            acc.known_usd += cost.known_usd;
+            acc.unknown_tokens = acc.unknown_tokens.saturating_add(cost.unknown_tokens);
+        } else {
+            // Missing request-level cost is unknown, not a free day.
+            for (input, _, output) in models.values() {
+                acc.unknown_tokens = acc
+                    .unknown_tokens
+                    .saturating_add(input.saturating_add(*output));
             }
         }
     }
@@ -613,10 +659,42 @@ fn merge_daily(
 
 /// Prices at the usage day's rates, like the cost scanners, so usage from
 /// before a model's repricing keeps the rates it was billed at.
+#[cfg(test)]
 fn codex_cost_on_day(day: &str, model: &str, input: u64, cached: u64, output: u64) -> Option<f64> {
+    codex_cost_on_day_with_snapshot(
+        day,
+        model,
+        input,
+        cached,
+        output,
+        &crate::core::pricing_snapshot(),
+    )
+}
+
+fn codex_cost_on_day_with_snapshot(
+    day: &str,
+    model: &str,
+    input: u64,
+    cached: u64,
+    output: u64,
+    snapshot: &crate::core::ModelsDevPricingSnapshot,
+) -> Option<f64> {
     match CostUsageDayRange::parse_day_key(day) {
-        Some(day) => CostUsagePricing::codex_cost_usd_at_date(model, input, cached, output, day),
-        None => CostUsagePricing::codex_cost_usd(model, input, cached, output),
+        Some(day) => CostUsagePricing::codex_cost_usd_at_date_with_pricing_snapshot(
+            model,
+            input,
+            cached,
+            output,
+            day,
+            Some(snapshot),
+        ),
+        None => CostUsagePricing::codex_cost_usd_with_pricing_snapshot(
+            model,
+            input,
+            cached,
+            output,
+            Some(snapshot),
+        ),
     }
 }
 
@@ -1032,7 +1110,15 @@ mod tests {
         let sol = |day: &str| {
             let models = HashMap::from([("gpt-5.6-sol".to_string(), (100, 10, 5))]);
             let mut daily = HashMap::new();
-            merge_daily(&mut daily, &HashMap::from([(day.to_string(), models)]));
+            let cost = CostEstimate {
+                known_usd: codex_cost_on_day(day, "gpt-5.6-sol", 100, 10, 5).unwrap(),
+                unknown_tokens: 0,
+            };
+            merge_daily(
+                &mut daily,
+                &HashMap::from([(day.to_string(), models)]),
+                &HashMap::from([(day.to_string(), cost)]),
+            );
             daily[day].known_usd
         };
         let historical = 90.0 * 5e-6 + 10.0 * 5e-7 + 5.0 * 3e-5;
@@ -1301,5 +1387,34 @@ mod tests {
         let unnamed = index.load_snapshot(false, |_| {}).unwrap();
         assert_eq!(unnamed.projects[0].display_name, "proj-a");
         assert_eq!(unnamed.total, fresh.total);
+    }
+    #[test]
+    fn workspace_prices_dynamic_models_from_snapshot_and_keeps_unknown_unpriced() {
+        let catalog = crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests(
+            r#"{"openai":{"models":{"gpt-example":{"id":"gpt-example","cost":{"input":2,"output":8,"cache_read":0.5}}}}}"#,
+        ).unwrap();
+        let empty =
+            crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests("{}").unwrap();
+        let cost = codex_cost_on_day_with_snapshot(
+            "2026-10-12",
+            "gpt-example",
+            100_000,
+            50_000,
+            1_000,
+            &catalog,
+        )
+        .unwrap();
+        assert!((cost - 0.133).abs() < 1e-9);
+        assert_eq!(
+            codex_cost_on_day_with_snapshot(
+                "2026-10-12",
+                "gpt-example",
+                100_000,
+                50_000,
+                1_000,
+                &empty
+            ),
+            None
+        );
     }
 }

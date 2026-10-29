@@ -44,8 +44,8 @@ pub fn open_or_focus(app: &tauri::AppHandle, tab: &str) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Force DWM caption to dark; keep WS_THICKFRAME since window is resizable
-    super::dwm::force_dark_caption_resizable(&win);
+    // Keep native resizing and opt this borderless window into Windows 11 rounding.
+    super::dwm::settings_chrome(&win);
 
     // Manually center: Tauri's .center() is unreliable on Windows when
     // called from async commands. Compute position from the primary monitor.

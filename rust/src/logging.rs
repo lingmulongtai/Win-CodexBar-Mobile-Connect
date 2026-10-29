@@ -154,6 +154,18 @@ pub fn init(verbose: bool, json: bool) -> anyhow::Result<()> {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
     };
 
+    // Preserve the user's explicit module filter, but keep spend-stage timings
+    // visible in the desktop diagnostic log even when RUST_LOG defaults to warn.
+    let filter = if *LOG_FILE_STEM == LOG_FILE_STEM_DESKTOP
+        && !std::env::var("RUST_LOG")
+            .unwrap_or_default()
+            .contains("codexbar_desktop_tauri::commands::usage_spend")
+    {
+        filter.add_directive("codexbar_desktop_tauri::commands::usage_spend=info".parse()?)
+    } else {
+        filter
+    };
+
     let file_writer = file_writer();
     let stderr_layer = if json {
         fmt::layer().json().with_writer(std::io::stderr).boxed()

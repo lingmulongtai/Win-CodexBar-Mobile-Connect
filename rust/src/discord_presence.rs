@@ -24,7 +24,9 @@ pub struct UsagePeriods {
 }
 
 fn compact_tokens(n: u64) -> String {
-    if n >= 1_000_000 {
+    if n >= 1_000_000_000 {
+        format!("{:.1}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
         format!("{:.1}k", n as f64 / 1_000.0)
@@ -177,7 +179,11 @@ pub fn current_session_with_priority<'a>(
             return false;
         }
         stale_reads += 1;
-        let Some(started) = metadata::codex_open_turn(std::path::Path::new(path), now) else {
+        // Give the four newest candidates a wider search, while bounding
+        // total I/O if many stale sessions are present.
+        let Some(started) =
+            metadata::codex_open_turn(std::path::Path::new(path), now, stale_reads <= 4)
+        else {
             return false;
         };
         // Process-to-transcript correlation is approximate. Require a
@@ -317,12 +323,43 @@ pub fn activity_for_session_with_options(
     if let Some(start) = meta.started_at.filter(|_| options.show_elapsed) {
         activity["timestamps"] = json!({"start": start.timestamp()});
     }
-    apply_presentation(&mut activity, options);
+    apply_presentation(&mut activity, options, true);
     activity
 }
 
+/// Add the separately sourced Codex account lifetime only when sharing is enabled.
+pub fn append_codex_account_lifetime(
+    activity: &mut Value,
+    provider: Option<AgentSessionProvider>,
+    tokens_enabled: bool,
+    options: &DiscordPresenceOptions,
+    tokens: Option<u64>,
+) {
+    if !tokens_enabled
+        || !options.show_codex_lifetime
+        || provider == Some(AgentSessionProvider::Claude)
+        || provider == Some(AgentSessionProvider::Pi)
+    {
+        return;
+    }
+    let Some(tokens) = tokens else { return };
+    let suffix = format!(" · Codex total {}", compact_tokens(tokens));
+    let current = activity["details"].as_str().unwrap_or("");
+    // Discord accepts at most 128 characters in a detail field; preserve the total.
+    let available = 128_usize.saturating_sub(suffix.encode_utf16().count());
+    let mut used = 0;
+    let prefix: String = current
+        .chars()
+        .take_while(|c| {
+            used += c.len_utf16();
+            used <= available
+        })
+        .collect();
+    activity["details"] = json!(format!("{prefix}{suffix}"));
+}
+
 /// Apply the same privacy and appearance choices to active and idle activity.
-pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions) {
+pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions, active: bool) {
     if !options.show_github
         && let Some(object) = activity.as_object_mut()
     {
@@ -358,7 +395,23 @@ pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions
     }
     // Only public HTTPS URLs may be sent to Discord. Never transmit local paths,
     // credentials, fragments, or a malformed value as an image reference.
-    let url = options.image_url.trim();
+    let selected_motion = if active {
+        &options.pet_active_motion
+    } else {
+        &options.pet_idle_motion
+    };
+    let motion = match selected_motion.as_str() {
+        "idle" | "running-right" | "running-left" | "waving" | "jumping" | "failed" | "waiting"
+        | "running" | "review" => selected_motion.as_str(),
+        _ if active => "running",
+        _ => "idle",
+    };
+    let animated = pet_links::slug_from_link(options.pet_url.trim()).map(|slug| {
+        format!("https://win-codexbar-pet-images.vercel.app/api/pet?pet={slug}&motion={motion}")
+    });
+    let url = animated
+        .as_deref()
+        .unwrap_or_else(|| options.image_url.trim());
     if url.len() <= 512
         && let Ok(parsed) = reqwest::Url::parse(url)
         && parsed.scheme() == "https"
@@ -404,7 +457,7 @@ pub fn idle_activity_with_options(
     if !labels.is_empty() {
         activity["state"] = json!(format!("📊 {}", labels.join(" · ")));
     }
-    apply_presentation(&mut activity, options);
+    apply_presentation(&mut activity, options, false);
     activity
 }
 
@@ -465,6 +518,95 @@ mod tests {
                 .unwrap()
                 .provider,
             AgentSessionProvider::Claude
+        );
+    }
+
+    #[test]
+    fn account_lifetime_is_opt_in_separate_and_limited_to_codex_or_idle() {
+        let mut options = DiscordPresenceOptions::default();
+        let mut hidden = idle_activity();
+        append_codex_account_lifetime(
+            &mut hidden,
+            Some(AgentSessionProvider::Codex),
+            true,
+            &options,
+            Some(12_300_000_000),
+        );
+        assert!(!hidden["details"].as_str().unwrap().contains("Codex total"));
+        options.show_codex_lifetime = true;
+        let mut active = json!({"details": "⚡ Codex · model", "state": "📊 D 10 · W 20"});
+        append_codex_account_lifetime(
+            &mut active,
+            Some(AgentSessionProvider::Codex),
+            true,
+            &options,
+            Some(12_300_000_000),
+        );
+        assert!(
+            active["details"]
+                .as_str()
+                .unwrap()
+                .contains("Codex total 12.3B")
+        );
+        assert_eq!(active["state"], "📊 D 10 · W 20");
+        let mut idle = idle_activity();
+        append_codex_account_lifetime(&mut idle, None, true, &options, Some(12_300_000_000));
+        assert!(
+            idle["details"]
+                .as_str()
+                .unwrap()
+                .contains("Codex total 12.3B")
+        );
+        let mut claude = json!({"details":"Claude"});
+        append_codex_account_lifetime(
+            &mut claude,
+            Some(AgentSessionProvider::Claude),
+            true,
+            &options,
+            Some(12),
+        );
+        assert_eq!(claude["details"], "Claude");
+        let mut tracking_off = json!({"details":"Codex"});
+        append_codex_account_lifetime(
+            &mut tracking_off,
+            Some(AgentSessionProvider::Codex),
+            false,
+            &options,
+            Some(12),
+        );
+        assert_eq!(tracking_off["details"], "Codex");
+        let mut missing = json!({"details":"Codex"});
+        append_codex_account_lifetime(
+            &mut missing,
+            Some(AgentSessionProvider::Codex),
+            true,
+            &options,
+            None,
+        );
+        assert_eq!(missing["details"], "Codex");
+        let mut long = json!({"details":"猫".repeat(180)});
+        append_codex_account_lifetime(
+            &mut long,
+            Some(AgentSessionProvider::Codex),
+            true,
+            &options,
+            Some(12_300_000_000),
+        );
+        let details = long["details"].as_str().unwrap();
+        assert_eq!(details.chars().count(), 128);
+        assert!(details.ends_with("Codex total 12.3B"));
+    }
+
+    #[test]
+    fn lifetime_setting_is_off_for_existing_settings_and_round_trips() {
+        let legacy: DiscordPresenceOptions = serde_json::from_str(r#"{"showMonth":true}"#).unwrap();
+        assert!(!legacy.show_codex_lifetime);
+        let enabled: DiscordPresenceOptions =
+            serde_json::from_str(r#"{"showCodexLifetime":true}"#).unwrap();
+        assert!(enabled.show_codex_lifetime);
+        assert_eq!(
+            serde_json::to_value(enabled).unwrap()["showCodexLifetime"],
+            true
         );
     }
 
@@ -535,6 +677,57 @@ mod tests {
         let activity = activity_for_session_with_options(&s, now, false, None, &options);
         assert_eq!(activity["details"], "Codex");
         assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+    }
+
+    #[test]
+    fn codex_pets_use_selected_idle_and_active_animations() {
+        let mut options = DiscordPresenceOptions {
+            pet_url: "https://codex-pets.net/#/pets/maomao-kusuriya".into(),
+            image_url: "https://codex-pets.net/assets/pets/v/1/maomao-kusuriya/poster.webp".into(),
+            pet_idle_motion: "waving".into(),
+            pet_active_motion: "running-left".into(),
+            ..Default::default()
+        };
+        let idle = idle_activity_with_options(Some(AgentSessionProvider::Claude), None, &options);
+        assert_eq!(
+            idle["assets"]["large_image"],
+            "https://win-codexbar-pet-images.vercel.app/api/pet?pet=maomao-kusuriya&motion=waving"
+        );
+        let now = Utc::now();
+        for provider in [AgentSessionProvider::Codex, AgentSessionProvider::Claude] {
+            let active = activity_for_session_with_options(
+                &session(provider, now),
+                now,
+                false,
+                None,
+                &options,
+            );
+            assert_eq!(
+                active["assets"]["large_image"],
+                "https://win-codexbar-pet-images.vercel.app/api/pet?pet=maomao-kusuriya&motion=running-left"
+            );
+        }
+        options.pet_active_motion = "../../invalid".into();
+        let active = activity_for_session_with_options(
+            &session(AgentSessionProvider::Codex, now),
+            now,
+            false,
+            None,
+            &options,
+        );
+        assert!(
+            active["assets"]["large_image"]
+                .as_str()
+                .unwrap()
+                .ends_with("motion=running")
+        );
+        options.pet_url = "https://codex-pets.net.evil.test/share/cat".into();
+        let idle = idle_activity_with_options(None, None, &options);
+        assert_eq!(idle["assets"]["large_image"], options.image_url);
+        let legacy: DiscordPresenceOptions = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(legacy.pet_url.is_empty());
+        assert_eq!(legacy.pet_idle_motion, "idle");
+        assert_eq!(legacy.pet_active_motion, "running");
     }
 
     #[test]

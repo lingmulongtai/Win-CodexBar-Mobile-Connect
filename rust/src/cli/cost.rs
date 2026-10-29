@@ -646,7 +646,7 @@ fn build_json_payloads(
                     "supported": true,
                     "days_scanned": days,
                     "totals": cost_totals_json(&r.provider, &r.summary),
-                    "cost": {"total_usd": r.summary.total_cost_usd, "currency": "USD"},
+                    "cost": {"total_usd": r.summary.published_cost_usd(&r.provider), "currency": "USD"},
                     "tokens": {"input": r.summary.input_tokens, "output": r.summary.output_tokens, "cached": r.summary.cached_tokens},
                     "sessions_count": r.summary.sessions_count,
                     "historyCoverageIsEstablished": if matches!(r.provider.as_str(), "codex" | "pi") { serde_json::Value::Bool(r.summary.history_coverage_established) } else { serde_json::Value::Null },

@@ -358,6 +358,9 @@ fn a_look_alike_archived_rollout_is_scanned_as_a_new_file() {
     let (summary, stats, cache) = background_scan(&codex.dirs(), &codex.cache_root);
     assert!(stats.codex_history_read_paths.contains(&key(&look_alike)));
     assert_eq!(summary.input_tokens, 100, "the last report is kept");
+    // Newly read bytes are progress; only the following unchanged pass pauses.
+    assert!(cache.codex_scan_pause_reason.is_none());
+    let (_, _, cache) = background_scan(&codex.dirs(), &codex.cache_root);
     assert_eq!(
         cache.codex_scan_pause_reason,
         Some(CodexScanPauseReason::NoProgress)
