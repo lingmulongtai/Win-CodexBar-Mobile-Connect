@@ -171,6 +171,7 @@ pub struct ImportedSpendSource {
     pub hourly_activity: Vec<SpendActivityCell>,
 }
 
+#[derive(Default)]
 struct NativeSpendData {
     projects: Vec<ProjectUsage>,
     conversations: Vec<SessionUsage>,
@@ -469,6 +470,27 @@ pub fn build_local_spend_contract_from_summary(
     )
 }
 
+/// Build only the totals used by a summary card. Project, conversation and
+/// daily detail are loaded separately for the selected reporting period.
+pub fn build_local_spend_totals_from_summary(
+    provider_id: &str,
+    history_days: u32,
+    include_opencodex: bool,
+    hide_native_codex_when_opencodex_present: bool,
+    hide_personal_info: bool,
+    summary: CostSummary,
+) -> SpendContract {
+    build_contract_from_period_summary_inner(
+        provider_id,
+        CostReportingPeriod::Rolling(history_days.clamp(1, MAX_ROLLING_DAYS)),
+        include_opencodex,
+        hide_native_codex_when_opencodex_present,
+        hide_personal_info,
+        summary,
+        false,
+    )
+}
+
 /// Build the accounting contract for `period` from a summary scanned for that
 /// same period.
 ///
@@ -483,6 +505,26 @@ pub fn build_contract_from_period_summary(
     hide_native_codex_when_opencodex_present: bool,
     hide_personal_info: bool,
     summary: CostSummary,
+) -> SpendContract {
+    build_contract_from_period_summary_inner(
+        provider_id,
+        period,
+        include_opencodex,
+        hide_native_codex_when_opencodex_present,
+        hide_personal_info,
+        summary,
+        true,
+    )
+}
+
+fn build_contract_from_period_summary_inner(
+    provider_id: &str,
+    period: CostReportingPeriod,
+    include_opencodex: bool,
+    hide_native_codex_when_opencodex_present: bool,
+    hide_personal_info: bool,
+    summary: CostSummary,
+    include_details: bool,
 ) -> SpendContract {
     let history_days = period.sidecar_days(Utc::now());
     let custom = CustomPricing::load();
@@ -504,7 +546,11 @@ pub fn build_contract_from_period_summary(
         ..SpendTokenMix::default()
     };
 
-    let native = load_native_spend(provider_id, history_days, hide_personal_info);
+    let native = if include_details {
+        load_native_spend(provider_id, history_days, hide_personal_info)
+    } else {
+        NativeSpendData::default()
+    };
     let imports: Vec<_> = if include_opencodex {
         opencodex::load_for_subscription(provider_id, history_days, &custom)
             .into_iter()
