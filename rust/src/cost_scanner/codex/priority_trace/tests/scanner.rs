@@ -525,17 +525,20 @@ fn long_context_rows_use_long_rates_and_short_priority_rows_use_fast_rates() {
     let (summary, _, _) = env.scan(CostScanOptions::app_driven(), &db.path);
 
     let standard_turn = 272_001.0 * 8e-6 + 10.0 * 3e-5;
-    let standard_first_row = 300_000.0 * 8e-6 + 5.0 * 3e-5;
+    let priority_first_row = (300_000.0 * 8e-6 + 5.0 * 3e-5) * 2.0;
     let priority_second_row = (100_001.0 * 4e-6 + 5.0 * 2e-5) * 2.0;
     assert_cost(
         summary.total_cost_usd,
-        standard_turn + standard_first_row + priority_second_row,
+        standard_turn + priority_first_row + priority_second_row,
     );
-    assert_cost(summary.by_speed["fast"], priority_second_row);
+    assert_cost(
+        summary.by_speed["fast"],
+        priority_first_row + priority_second_row,
+    );
 }
 
 #[test]
-fn gpt56_long_context_priority_row_keeps_the_long_base_cost() {
+fn gpt56_long_context_priority_row_doubles_the_long_base_cost() {
     let env = Env::new();
     priority_session(&env, "gpt-5.6-sol", 272_001, 100_000, 5);
     let db = env.create_db();
@@ -543,12 +546,11 @@ fn gpt56_long_context_priority_row_keeps_the_long_base_cost() {
 
     let (summary, _, _) = env.scan(CostScanOptions::app_driven(), &db.path);
 
-    let expected = 172_001.0 * 8e-6 + 100_000.0 * 8e-7 + 5.0 * 3e-5;
+    let expected = (172_001.0 * 8e-6 + 100_000.0 * 8e-7 + 5.0 * 3e-5) * 2.0;
     assert_cost(summary.total_cost_usd, expected);
-    assert_cost(summary.by_model["gpt-5.6-sol"], expected);
-    assert!(!summary.by_speed.contains_key("fast"));
-    // Same bucket deviation as the gpt-5.4-nano case above.
-    assert_eq!(summary.by_speed_tokens["standard"].total(), 272_006);
+    assert_cost(summary.by_model["gpt-5.6-sol-priority"], expected);
+    assert_cost(summary.by_speed["fast"], expected);
+    assert_eq!(summary.by_speed_tokens["fast"].total(), 272_006);
 }
 
 #[test]
