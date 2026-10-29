@@ -1792,3 +1792,15 @@ export interface HooksConfigSave {
   enabled?: boolean | null;
   rules: HookRulePayload[];
 }
+
+export interface DiscordPresenceStatus {
+  status: "disabled" | "connecting" | "connected";
+  usage: "available" | "localOnly" | "partial" | "partialLoading" | "loading" | "unavailable" | "trackingOff" | "hidden";
+  activity: null | {
+    details?: string;
+    state?: string;
+    timestamps?: { start?: number };
+    assets?: { large_image?: string; large_text?: string };
+    buttons?: { label: string; url: string }[];
+  };
+}

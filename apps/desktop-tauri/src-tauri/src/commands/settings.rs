@@ -842,8 +842,10 @@ pub(crate) fn update_settings_checked(
     let rebuild_tray_menu = patch.rebuilds_tray_menu();
     let refresh_tray_presentation = patch.refreshes_tray_presentation();
     let stay_awake_changed = patch.stay_awake_enabled.is_some();
-    let discord_presence_changed =
-        patch.discord_presence_enabled.is_some() || patch.discord_presence_options.is_some();
+    let discord_presence_changed = patch.discord_presence_enabled.is_some()
+        || patch.discord_presence_options.is_some()
+        || patch.cost_usage_enabled.is_some()
+        || patch.codex_custom_sessions_dirs.is_some();
     let tray_promotion_changed = patch.changes_tray_promotion();
     let tray_panel_always_on_top_changed = patch.tray_panel_always_on_top.is_some();
     let previous_promoted = settings.promote_tray_icon;

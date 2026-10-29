@@ -1,19 +1,25 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SettingsSnapshot } from "../../../types/bridge";
 import DiscordTab from "./DiscordTab";
-import { openExternalUrl, resolveCodexPet } from "../../../lib/tauri";
+import { getDiscordPresenceStatus, openExternalUrl, resolveCodexPet } from "../../../lib/tauri";
 
-vi.mock("../../../lib/tauri", () => ({ resolveCodexPet: vi.fn(), openExternalUrl: vi.fn() }));
+vi.mock("../../../lib/tauri", () => ({ resolveCodexPet: vi.fn(), openExternalUrl: vi.fn(), getDiscordPresenceStatus: vi.fn() }));
 
 vi.mock("../../../hooks/useLocale", () => ({
   useLocale: () => ({ t: (key: string) => key }),
 }));
 
 describe("DiscordTab", () => {
-  it("starts disabled and saves an explicit opt-in", () => {
+  beforeEach(() => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValue({ status: "connected", usage: "available", activity: {
+      details: "⚡ Claude Code · claude-sonnet", state: "📊 D 12k", buttons: [{ label: "View on GitHub", url: "https://github.com/example/project" }],
+    } });
+  });
+  it("starts disabled and saves an explicit opt-in", async () => {
     const set = vi.fn();
     render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
     const toggle = screen.getByRole("checkbox", { name: "DiscordPresenceLabel" });
     expect(toggle).not.toBeChecked();
     expect(screen.getByText("DiscordPresenceHelper")).toBeInTheDocument();
@@ -21,10 +27,11 @@ describe("DiscordTab", () => {
     expect(set).toHaveBeenCalledWith({ discordPresenceEnabled: true });
   });
 
-  it("preserves the enabled value, permits turning it off, and disables edits while saving", () => {
+  it("preserves the enabled value, permits turning it off, and disables edits while saving", async () => {
     const set = vi.fn();
     const settings = { discordPresenceEnabled: true } as SettingsSnapshot;
     const { rerender } = render(<DiscordTab settings={settings} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
     const toggle = screen.getByRole("checkbox", { name: "DiscordPresenceLabel" });
     expect(toggle).toBeChecked();
     fireEvent.click(toggle);
@@ -32,11 +39,10 @@ describe("DiscordTab", () => {
     rerender(<DiscordTab settings={settings} set={set} saving />);
     expect(toggle).toBeDisabled();
   });
-  it("previews selectable services and saves priority and field choices", () => {
+  it("saves priority and field choices", async () => {
     const set = vi.fn();
     render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
-    fireEvent.change(screen.getByRole("combobox", { name: "DiscordPreviewProvider" }), { target: { value: "claude" } });
-    expect(screen.getByText(/Claude Code · Claude Sonnet/)).toBeInTheDocument();
+    await screen.findByText("DiscordUsageAvailable");
     fireEvent.change(screen.getByRole("combobox", { name: "DiscordPriority" }), { target: { value: "codex" } });
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ discordPresenceOptions: expect.objectContaining({ priority: "codex" }) }));
     fireEvent.click(screen.getByRole("checkbox", { name: "DiscordShowModel" }));
@@ -67,22 +73,50 @@ describe("DiscordTab", () => {
     expect(set).not.toHaveBeenCalled();
   });
 
-  it("shows the selected layout in the preview", () => {
-    const set = vi.fn();
-    const settings = { discordPresenceOptions: { format: "modelFirst" } } as SettingsSnapshot;
-    const { rerender } = render(<DiscordTab settings={settings} set={set} saving={false} />);
-    expect(screen.getByText(/GPT-5.5 · Codex/)).toBeInTheDocument();
-    rerender(<DiscordTab settings={{ discordPresenceOptions: { format: "service" } } as SettingsSnapshot} set={set} saving={false} />);
-    expect(screen.getByText(/Using Codex/)).toBeInTheDocument();
+  it("shows only the activity accepted by Discord", async () => {
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("⚡ Claude Code · claude-sonnet")).toBeInTheDocument();
+    expect(screen.getByText("📊 D 12k")).toBeInTheDocument();
     expect(screen.queryByText(/GPT-5.5/)).not.toBeInTheDocument();
+    expect(screen.getByText("DiscordPreviewHelp")).toBeInTheDocument();
   });
 
-  it("saves the GitHub URL and lets the user open it from the preview", () => {
+  it("updates the preview after Discord accepts a new activity", async () => {
+    vi.mocked(getDiscordPresenceStatus)
+      .mockResolvedValueOnce({ status: "connected", usage: "available", activity: { details: "Codex", state: "📊 D 1k" } })
+      .mockResolvedValue({ status: "connected", usage: "available", activity: { details: "Claude Code", state: "📊 D 2k" } });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("Codex")).toBeInTheDocument();
+    expect(await screen.findByText("Claude Code", {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(screen.getByText("📊 D 2k")).toBeInTheDocument();
+  });
+
+  it("reports an unavailable connection without showing stale data", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connecting", usage: "unavailable", activity: null });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("DiscordLiveConnecting")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Code/)).not.toBeInTheDocument();
+  });
+
+  it("explains that marked calendar totals exclude deleted files", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connected", usage: "localOnly", activity: { details: "Codex", state: "📊 D~ 12k" } });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("📊 D~ 12k")).toBeInTheDocument();
+    expect(screen.getByText("DiscordUsageLocalOnly")).toBeInTheDocument();
+  });
+
+  it("explains when local token data is unavailable", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connected", usage: "unavailable", activity: { details: "Claude Code" } });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("DiscordUsageUnavailable")).toBeInTheDocument();
+  });
+
+  it("saves the GitHub URL and lets the user open the sent link", async () => {
     const set = vi.fn();
     vi.mocked(openExternalUrl).mockResolvedValue(undefined);
     const settings = { discordPresenceOptions: { githubUrl: "https://github.com/example/project" } } as SettingsSnapshot;
     render(<DiscordTab settings={settings} set={set} saving={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "View on GitHub" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View on GitHub" }));
     expect(openExternalUrl).toHaveBeenCalledWith("https://github.com/example/project");
     const input = screen.getByRole("textbox", { name: "DiscordGithubUrl" });
     fireEvent.focus(input);
@@ -91,9 +125,20 @@ describe("DiscordTab", () => {
     expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { githubUrl: "https://github.com/example/other" } });
   });
 
-  it("does not save a non-GitHub button destination", () => {
+  it("opens the configured GitHub link even while Discord is disconnected", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "connecting", usage: "unavailable", activity: null });
+    vi.mocked(openExternalUrl).mockResolvedValue(undefined);
+    const settings = { discordPresenceOptions: { githubUrl: "https://github.com/example/project" } } as SettingsSnapshot;
+    render(<DiscordTab settings={settings} set={vi.fn()} saving={false} />);
+    await screen.findByText("DiscordLiveConnecting");
+    fireEvent.click(screen.getByRole("button", { name: "DiscordGithubTest" }));
+    expect(openExternalUrl).toHaveBeenCalledWith("https://github.com/example/project");
+  });
+
+  it("does not save a non-GitHub button destination", async () => {
     const set = vi.fn();
     render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
     const input = screen.getByRole("textbox", { name: "DiscordGithubUrl" });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "https://github.com.attacker.example/repo" } });
