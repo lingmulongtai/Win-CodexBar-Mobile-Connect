@@ -666,3 +666,5 @@ export function getCodexAccountsState(): Promise<CodexAccountsStateBridge> {
 export function getSafeDiagnostics(): Promise<string> {
   return invoke<string>("get_safe_diagnostics");
 }
+
+export const resolveCodexPet = (link: string) => invoke<string>("resolve_codex_pet", { link });
