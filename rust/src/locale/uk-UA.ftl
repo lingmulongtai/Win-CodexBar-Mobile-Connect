@@ -1815,8 +1815,19 @@ DiscordShowMonth = This month tokens
 DiscordShowGithub = GitHub button
 DiscordShowEmoji = Emoji
 DiscordPet = Pet image
+DiscordPetIdleMotion = Idle motion
+DiscordPetActiveMotion = Working motion
+DiscordMotionIdle = Idle
+DiscordMotionRunning = Working
+DiscordMotionRight = Run right
+DiscordMotionLeft = Run left
+DiscordMotionWaving = Wave
+DiscordMotionJumping = Jump
+DiscordMotionFailed = Failed
+DiscordMotionWaiting = Waiting
+DiscordMotionReview = Review
 DiscordPetUrl = Codex Pets link / public image URL
-DiscordPetHelp = Paste a Codex Pets share link to use its static poster, or a public image URL such as a GIF. The preview and Discord fetch the image from its host. Leave empty for the included animated pet.
+DiscordPetHelp = Codex Pets links generate animated images. The pet name is sent to the public Vercel service and Codex Pets, and Discord fetches the image. Public image URLs are also supported.
 DiscordPreviewHelp = This shows the activity accepted by Discord. Activity normally updates every 20 seconds and calendar totals every five minutes. Buttons appear to other people, not on your own Discord profile. Layout varies by screen.
 DiscordPetInvalid = Check the link: the pet could not be loaded or the HTTPS URL is invalid.
 DiscordPetLoading = Loading pet…
@@ -1847,3 +1858,5 @@ CodexAccountUsageUnavailable = Codex account total is unavailable.
 
 UsageSpendDiagnostics = Diagnostic log
 UsageSpendDiagnosticsRefresh = Refresh log
+
+DiscordShowCodexLifetime = Share Codex account lifetime tokens

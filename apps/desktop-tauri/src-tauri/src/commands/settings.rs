@@ -14,10 +14,14 @@ pub struct DiscordOptionsPatch {
     show_today: Option<bool>,
     show_week: Option<bool>,
     show_month: Option<bool>,
+    show_codex_lifetime: Option<bool>,
     show_github: Option<bool>,
     github_url: Option<String>,
     show_emoji: Option<bool>,
     image_url: Option<String>,
+    pet_url: Option<String>,
+    pet_idle_motion: Option<String>,
+    pet_active_motion: Option<String>,
 }
 
 impl DiscordOptionsPatch {
@@ -33,10 +37,14 @@ impl DiscordOptionsPatch {
             show_today,
             show_week,
             show_month,
+            show_codex_lifetime,
             show_github,
             github_url,
             show_emoji,
-            image_url
+            image_url,
+            pet_url,
+            pet_idle_motion,
+            pet_active_motion
         );
     }
 }

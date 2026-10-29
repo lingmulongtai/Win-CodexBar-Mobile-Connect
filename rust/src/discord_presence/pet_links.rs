@@ -3,7 +3,7 @@ use reqwest::Url;
 use serde_json::Value;
 use std::time::Duration;
 
-fn slug_from_link(link: &str) -> Option<String> {
+pub(super) fn slug_from_link(link: &str) -> Option<String> {
     let url = Url::parse(link).ok()?;
     if url.scheme() != "https"
         || url.host_str() != Some("codex-pets.net")

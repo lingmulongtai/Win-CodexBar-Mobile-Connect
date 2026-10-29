@@ -9,17 +9,17 @@ import type { TabProps } from "../settingsTabs";
 const defaults: DiscordPresenceOptions = {
   priority: "recent", format: "detailed", showModel: true, showMode: true,
   showElapsed: true, showSessionTokens: true, showToday: true, showWeek: true,
-  showMonth: true, showGithub: true, githubUrl: "", showEmoji: true, imageUrl: "",
+  showMonth: true, showCodexLifetime: false, showGithub: true, githubUrl: "", showEmoji: true, imageUrl: "", petUrl: "", petIdleMotion: "idle", petActiveMotion: "running",
 };
 const fields: [keyof DiscordPresenceOptions, LocaleKey][] = [
   ["showModel", "DiscordShowModel"], ["showMode", "DiscordShowMode"],
   ["showElapsed", "DiscordShowElapsed"], ["showSessionTokens", "DiscordShowSession"],
   ["showToday", "DiscordShowToday"], ["showWeek", "DiscordShowWeek"],
-  ["showMonth", "DiscordShowMonth"], ["showGithub", "DiscordShowGithub"],
+  ["showMonth", "DiscordShowMonth"], ["showCodexLifetime", "DiscordShowCodexLifetime"], ["showGithub", "DiscordShowGithub"],
   ["showEmoji", "DiscordShowEmoji"],
 ];
 
-function ImageUrl({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+function ImageUrl({ value, onChange, disabled }: { value: string; onChange: (v: string, petUrl: string) => void; disabled: boolean }) {
   const aria = useFieldAria();
   const { t } = useLocale();
   const [draft, setDraft] = useState(value);
@@ -40,11 +40,11 @@ function ImageUrl({ value, onChange, disabled }: { value: string; onChange: (v: 
     if (!valid) { setInvalid(true); return; }
     if (petLink) {
       setBusy(true);
-      try { onChange(await resolveCodexPet(draft)); setEditing(false); }
+      try { onChange(await resolveCodexPet(draft), draft); setEditing(false); }
       catch { setInvalid(true); }
       finally { setBusy(false); }
     } else {
-      if (draft !== value) onChange(draft);
+      if (draft !== value) onChange(draft, "");
       setEditing(false);
     }
   };
@@ -55,6 +55,16 @@ function ImageUrl({ value, onChange, disabled }: { value: string; onChange: (v: 
     {busy && <div role="status">{t("DiscordPetLoading")}</div>}
     {invalid && <div role="alert">{t("DiscordPetInvalid")}</div>}
   </div>;
+}
+
+
+function motionOptions(t: (key: LocaleKey) => string) {
+  return ([
+    ["idle", "DiscordMotionIdle"], ["running", "DiscordMotionRunning"],
+    ["running-right", "DiscordMotionRight"], ["running-left", "DiscordMotionLeft"],
+    ["waving", "DiscordMotionWaving"], ["jumping", "DiscordMotionJumping"],
+    ["failed", "DiscordMotionFailed"], ["waiting", "DiscordMotionWaiting"], ["review", "DiscordMotionReview"],
+  ] as [string, LocaleKey][]).map(([value, label]) => ({ value, label: t(label) }));
 }
 
 const defaultGithubUrl = "https://github.com/lingmulongtai/Win-CodexBar-Mobile-Connect";
@@ -172,7 +182,9 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
       {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPet")} footer={t("DiscordPetHelp")}>
-      <Field label={t("DiscordPetUrl")}><ImageUrl value={options.imageUrl} onChange={(imageUrl) => change({ imageUrl })} disabled={saving} /></Field>
+      <Field label={t("DiscordPetUrl")}><ImageUrl value={options.petUrl || options.imageUrl} onChange={(imageUrl, petUrl) => change({ imageUrl, petUrl })} disabled={saving} /></Field>
+      <Field label={t("DiscordPetIdleMotion")}><Select value={options.petIdleMotion} disabled={saving || !options.petUrl} onChange={(petIdleMotion) => change({ petIdleMotion })} options={motionOptions(t)} /></Field>
+      <Field label={t("DiscordPetActiveMotion")}><Select value={options.petActiveMotion} disabled={saving || !options.petUrl} onChange={(petActiveMotion) => change({ petActiveMotion })} options={motionOptions(t)} /></Field>
     </SettingsGroup>
   </>;
 }
