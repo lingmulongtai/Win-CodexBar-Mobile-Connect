@@ -171,6 +171,7 @@ pub(crate) fn recover_rows(
 /// Construct a cache entry for source rows after a complete read. The cache
 /// exists only when file identity and the prefix hash can both be computed,
 /// so every retained cache carries a usable freshness receipt.
+#[cfg(test)]
 pub(crate) fn row_cache(
     file_path: &Path,
     metadata: &fs::Metadata,
@@ -211,9 +212,12 @@ pub(crate) fn row_cache_matches(
     {
         return false;
     }
-    if cached.prefix_hash
-        != source_prefix_hash(file_path, u64::try_from(cached.size.max(0)).unwrap_or(0))
-            .unwrap_or(0)
+    // Zero denotes rows retained directly by the bounded parser, whose
+    // normal append validation uses file identity, size and modification time.
+    if cached.prefix_hash != 0
+        && cached.prefix_hash
+            != source_prefix_hash(file_path, u64::try_from(cached.size.max(0)).unwrap_or(0))
+                .unwrap_or(0)
     {
         return false;
     }

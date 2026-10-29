@@ -9,8 +9,14 @@ mod logical_target;
 mod pending_range;
 mod priority_trace;
 mod reconciliation;
+mod saved_history;
 mod scan;
-use cache_days::rebuild_cache_days;
+pub(crate) use cache_days::{
+    daily_prices_from_source_rows as codex_daily_request_prices,
+    price_summary_from_source_rows as reprice_codex_from_source_rows,
+    request_price_supported as codex_request_price_supported,
+};
+use cache_days::{price_summary_from_source_rows, rebuild_cache_days};
 use flat_sources::{
     CodexFlatListing, earliest_flat_codex_day, is_flat_codex_path_in_scan_window,
     relocate_moved_codex_rollouts,
@@ -200,7 +206,7 @@ fn codex_scan_lock(cache_root: Option<&Path>) -> std::sync::Arc<std::sync::Mutex
     static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
     let root = cache_root
         .map(Path::to_path_buf)
-        .or_else(JsonlScanner::default_cache_root)
+        .or_else(JsonlScanner::default_codex_cache_root)
         .unwrap_or_else(|| PathBuf::from("."));
     // Resolve the same key before and after the cache is first persisted.
     // If creating or resolving the directory fails, serialize these uncommon
@@ -289,7 +295,21 @@ impl CostScanner {
         &self,
         cancel: Option<&AtomicBool>,
     ) -> (CostSummary, CostScanStats, CostUsageCache) {
-        let lock = codex_scan_lock(self.cache_root.as_deref());
+        let root = self
+            .cache_root
+            .clone()
+            .or_else(JsonlScanner::default_codex_cache_root);
+        let dirs = self.get_codex_sessions_dirs();
+        let scope_changed =
+            || self.cache_root.is_none() && root != JsonlScanner::default_codex_cache_root();
+        if scope_changed() {
+            return (
+                CostSummary::default(),
+                CostScanStats::default(),
+                CostUsageCache::default(),
+            );
+        }
+        let lock = codex_scan_lock(root.as_deref());
         let _guard = loop {
             match lock.try_lock() {
                 Ok(guard) => break guard,
@@ -306,7 +326,16 @@ impl CostScanner {
                 }
             }
         };
-        scan::scan_codex_detailed_with_cache(self, cancel)
+        let result = scan::scan_codex_detailed_with_cache(self, cancel, root.as_deref(), &dirs);
+        if scope_changed() {
+            (
+                CostSummary::default(),
+                CostScanStats::default(),
+                CostUsageCache::default(),
+            )
+        } else {
+            result
+        }
     }
 
     /// Scan Claude local logs
@@ -535,20 +564,9 @@ impl CostScanner {
         let file_identity = JsonlScanner::codex_file_identity(path, &metadata);
         let cached = cache.files.get(&path_key).cloned();
         let cache_covers_range = codex_cache_covers_file(cache, &path_key, range);
-        let trace_was_pruned = cached.as_ref().is_some_and(|entry| {
-            entry.size > size
-                && (entry.parsed_bytes.unwrap_or(0) > size || codex_scan_target_size(entry) > size)
-        });
-        if trace_was_pruned && !self.options.is_app_driven() {
-            // A shrinking trace invalidates the append cursor. Preserve the
-            // validated cache and queue the path for an explicit cold refresh
-            // instead of silently replacing history during synchronization.
-            return CodexFileScanOutcome {
-                bytes_read: 0,
-                is_complete: false,
-                reused_validated_prefix: false,
-            };
-        }
+        // A shorter file cannot reuse the append cursor; the normal bounded
+        // cold path below reparses it while the outer scan retains the previous
+        // report until the replacement is complete.
         let cache_entry_is_fresh = |entry: &CostUsageFileUsage| {
             cached_codex_file_is_fresh(cache, planner, entry, cache_covers_range, mtime_ms, size)
         };
@@ -791,14 +809,13 @@ impl CostScanner {
                 mark_included_records(&mut parse_result.records, has_creator_account);
                 let mut days = entry.days.clone();
                 merge_codex_records_into_days(&mut days, &parse_result.records);
-                if codex_forked_from_id.is_some() {
-                    // Only extend rows that already cover the parsed prefix;
-                    // a partial row set could never match the day totals.
-                    if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
-                        rows.extend(codex_fork_rows_from_records(&parse_result.records));
-                    }
-                } else {
-                    cache.codex_fork_rows.remove(&path_key);
+                // Retain the same event rows as the incrementally updated days.
+                if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
+                    rows.extend(codex_fork_rows_from_records(&parse_result.records));
+                } else if let Some(source) = cache.codex_source_rows.get(&path_key) {
+                    let mut rows = source.rows.clone();
+                    rows.extend(codex_fork_rows_from_records(&parse_result.records));
+                    cache.codex_fork_rows.insert(path_key.clone(), rows);
                 }
                 let (session_cost, has_tokens) =
                     add_codex_days_map_to_summary(summary, &days, range);
@@ -969,16 +986,13 @@ impl CostScanner {
             _ => HashMap::new(),
         };
         merge_codex_records_into_days(&mut days, &parse_result.records);
-        if is_fork || codex_forked_from_id.is_some() {
-            // Priority evidence for fork-shaped files is tracked separately
-            // (source-row evidence skips them), so rebuild the row set from
-            // the same parsed records that fed the day totals.
-            cache.codex_fork_rows.insert(
-                path_key.clone(),
-                codex_fork_rows_from_records(&parse_result.records),
-            );
+        let new_rows = codex_fork_rows_from_records(&parse_result.records);
+        if resumed {
+            if let Some(rows) = cache.codex_fork_rows.get_mut(&path_key) {
+                rows.extend(new_rows);
+            }
         } else {
-            cache.codex_fork_rows.remove(&path_key);
+            cache.codex_fork_rows.insert(path_key.clone(), new_rows);
         }
         let (session_cost, has_tokens) = if resumed {
             add_codex_days_map_to_summary(summary, &days, range)

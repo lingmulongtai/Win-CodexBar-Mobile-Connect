@@ -533,7 +533,7 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
     let mut day_models: HashMap<String, HashMap<String, (u64, u64, u64)>> = HashMap::new();
     let mut day_costs: HashMap<String, CostEstimate> = HashMap::new();
 
-    for (record, _) in &parsed.records {
+    for record in crate::core::rows_from_records(&parsed.records) {
         let input = record.input.max(0) as u64;
         let cached = (record.cached.max(0) as u64).min(input);
         let output = record.output.max(0) as u64;
@@ -553,7 +553,10 @@ fn index_one_file(path: &Path, range: &CostUsageDayRange) -> Option<ParsedFile> 
         day_entry.2 = day_entry.2.saturating_add(output);
 
         let daily = day_costs.entry(record.day_key.clone()).or_default();
-        match codex_cost_on_day(&record.day_key, &model, input, cached, output) {
+        let price = crate::cost_scanner::codex_request_price_supported(path, &record, &model)
+            .then(|| codex_cost_on_day(&record.day_key, &model, input, cached, output))
+            .flatten();
+        match price {
             Some(usd) => {
                 cost.known_usd += usd;
                 daily.known_usd += usd;

@@ -64,6 +64,7 @@ fn codex_today_summary(history: &CostSummary, cache: &CostUsageCache) -> CostSum
     };
     let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, &range);
     summary.total_cost_usd = cost;
+    crate::cost_scanner::reprice_codex_from_source_rows(&mut summary, cache, &range);
     summary.sessions_count = cache
         .files
         .values()

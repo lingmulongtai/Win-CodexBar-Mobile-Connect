@@ -121,6 +121,7 @@ pub(super) fn codex_current_window_summary(
     };
     let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, range);
     summary.total_cost_usd = cost;
+    price_summary_from_source_rows(&mut summary, cache, range);
     Some(summary)
 }
 
