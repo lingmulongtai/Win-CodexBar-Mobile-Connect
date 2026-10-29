@@ -36,7 +36,22 @@ Same vocabulary as upstream, implemented in Rust:
 
 CLI: `codexbar usage --source auto|web|cli|oauth`.
 
+For Codex Free responses that report a fixed 30-day allowance, pace uses the
+reported 43,200-minute window. Shorter session and weekly windows keep their
+existing pace calculation; the fixed window is not inferred as a calendar month.
+
 Auth resolution helpers in `rust/src/providers/` commonly try: explicit settings → keyring/entry → environment variables (exact order is provider-specific).
+
+### Cursor app session
+
+Automatic mode first reuses a recently validated Cursor app session, or reads
+`cursorAuth/accessToken` from `%APPDATA%\Cursor\User\globalStorage\state.vscdb`
+without writing to the database, before falling back to browser cookies.
+Cursor may store the token in a `cursor-safe-storage:v1:` envelope; on Windows,
+Win-CodexBar decrypts it using the DPAPI-protected Chromium key in Cursor's
+`Local State`. Plain tokens do not read the key. Unreadable, oversized, or
+unknown-format entries yield no app session, so Automatic mode falls through
+to browser cookies.
 
 ### Devin manual authentication
 
@@ -389,7 +404,9 @@ Configure the API key in Settings → Providers → Tavily (or `TAVILY_API_KEY`)
   usage percentage. Remaining credits are the nonnegative difference between
   reported cap and usage.
 - Pay-as-you-go totals, when present (`account.paygo_usage` and
-  `account.paygo_limit`), appear in a separate detail section.
+  `account.paygo_limit`), appear in a separate detail section. A null
+  pay-as-you-go limit leaves the cap unspecified: the section shows only the
+  reported usage, with no Limit or Remaining row.
 - The plan name (`account.current_plan`) identifies the account plan. No email
   or account ID is inferred; unknown plans do not create a phantom identity.
 - Non-200 responses report "Tavily returned HTTP <status>."; response bodies
