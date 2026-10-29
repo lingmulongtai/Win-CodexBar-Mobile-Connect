@@ -454,7 +454,7 @@ mod tests {
     fn large_claude_session_tokens_refresh_when_the_file_changes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("claude.jsonl");
-        let padding = "x".repeat(MAX_TRANSCRIPT_BYTES as usize + 1);
+        let padding = "x".repeat(usize::try_from(MAX_TRANSCRIPT_BYTES).unwrap() + 1);
         let row = r#"{"type":"assistant","timestamp":"2026-01-01T01:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":2}}}"#;
         std::fs::write(
             &path,
