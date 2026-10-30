@@ -8,7 +8,7 @@ The feature scans only this PC, independently of remote session settings and Mob
 
 The **View on GitHub** button defaults to this fork's public repository; a custom `https://github.com/` URL can be entered in Discord settings. The button can also be turned off. The settings preview can open the selected link locally. Discord shows Rich Presence buttons to other users, but does not show them on your own profile; see the [Discord Rich Presence documentation](https://github.com/discord/discord-api-docs/blob/main/developers/discord-social-sdk/development-guides/setting-rich-presence.mdx).
 
-The Discord application ID is `[REMOVED]` and belongs to this fork's Discord application. Discord must be running locally; the app retries when it becomes available. No bot token, OAuth login or extra process is required.
+Enter your own Discord Developer Portal Application ID in Settings → Discord. The ID is stored locally as text, is excluded from portable preferences, and can be changed or cleared. Discord must be running locally; the app retries when it becomes available. Do not enter a Bot Token or Client Secret. An empty or invalid ID leaves Rich Presence disconnected.
 
 ## Appearance settings
 
@@ -35,6 +35,8 @@ On 2026-10-29, fetched upstream again before Discord customization; the default 
 On 2026-10-29, checked the read-only upstream default branch at `1d3c1305bfb643b6ea643d176bdc31c381ba27b1`, unchanged from the immediately preceding upstream review in `docs/PORTING.md`. No new upstream Discord changes were available; the previously documented OpenCode, Kimi and provider incompatibilities remain deferred.
 
 On 2026-10-29, fetched the read-only upstream default branch before the Codex spend and presence fixes: `1d3c1305bfb643b6ea643d176bdc31c381ba27b1`, unchanged from the preceding review. No new upstream changes were available. Previously deferred OpenCode history integration remains separate because its collector and settings paths require fork-specific validation.
+
+On 2026-10-30, fetched the read-only upstream default branch before making the Discord Application ID configurable: `1d3c1305bfb643b6ea643d176bdc31c381ba27b1`, unchanged from the preceding review. No new upstream changes were available. Existing deferred OpenCode history and provider changes remain outside this task.
 
 ## Validation
 
