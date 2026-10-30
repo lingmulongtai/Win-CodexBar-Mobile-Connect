@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
   getUsageSpendSummary: vi.fn(),
+  getCodexAccountUsage: vi.fn(),
   writeUsageSpendExport: vi.fn(),
 }));
 const eventHandlers = vi.hoisted(() => new Map<string, () => void>());
@@ -131,10 +132,17 @@ describe("UsageSpendTab", () => {
     vi.clearAllMocks();
     eventHandlers.clear();
     peerState.current = null;
+    tauriMocks.getCodexAccountUsage.mockResolvedValue({ summary: { lifetimeTokens: 12345678901, peakDailyTokens: null }, dailyUsageBuckets: null });
     tauriMocks.getUsageSpendSummary.mockImplementation(
       async (options?: { period?: string }) => summary(options?.period ?? "rolling:30"),
     );
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  it("shows the account lifetime total separately from local usage", async () => {
+    renderTab();
+    expect(await screen.findByText(/12,345,678,901/)).toBeInTheDocument();
+    expect(screen.getByText("CodexAccountUsageCaption")).toBeInTheDocument();
   });
 
   it("publishes the first result and coalesces updates arriving while scans run", async () => {

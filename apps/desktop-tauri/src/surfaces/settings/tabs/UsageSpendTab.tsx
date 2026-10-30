@@ -6,7 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useLocale } from "../../../hooks/useLocale";
 import { Field, Toggle } from "../../../components/FormControls";
 import { UsageSpendDailyLedger } from "../../../components/UsageSpendDailyLedger";
-import { getUsageSpendSummary, writeUsageSpendExport } from "../../../lib/tauri";
+import { getCodexAccountUsage, getUsageSpendSummary, writeUsageSpendExport } from "../../../lib/tauri";
 import { formatUsd, shareUsageSpendPng } from "../../../lib/usageSpendSharing";
 import { buildSpendProviderRowGroups } from "../../../lib/usageSpendBreakdown";
 import {
@@ -66,6 +66,24 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
   const hideNativeCodex = settings.hideNativeCodexCostWhenOpenCodexPresent ?? false;
   const hiddenKey = normalizeHiddenSourceIds(settings.spendDashboardHiddenSourceIds ?? []).join(",");
   const hidden = useMemo(() => (hiddenKey ? hiddenKey.split(",") : []), [hiddenKey]);
+
+  const [accountLifetime, setAccountLifetime] = useState<number | null>(null);
+  const [accountUnavailable, setAccountUnavailable] = useState(false);
+  useEffect(() => {
+    if (isRemote) return;
+    let cancelled = false;
+    const refresh = () => {
+      void getCodexAccountUsage().then((usage) => {
+        if (!cancelled) {
+          setAccountLifetime(usage.summary.lifetimeTokens);
+          setAccountUnavailable(usage.summary.lifetimeTokens == null);
+        }
+      }).catch(() => { if (!cancelled) { setAccountLifetime(null); setAccountUnavailable(true); } });
+    };
+    refresh();
+    const timer = setInterval(refresh, 300_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [isRemote]);
 
   const [summary, setSummary] = useState<UsageSpendSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -244,6 +262,13 @@ export default function UsageSpendTab({ settings, set, saving }: TabProps) {
       </div>
 
       {updating && summary && <p className="settings-section__caption" role="status">{t("UsageSpendRefreshing")}</p>}
+
+      {!isRemote && (accountLifetime !== null || accountUnavailable) && (
+        <div className="usage-spend__card" role="status">
+          <strong>{t("CodexAccountLifetime")}: {accountLifetime === null ? "—" : accountLifetime.toLocaleString()}</strong>
+          <p className="settings-section__caption">{t(accountUnavailable ? "CodexAccountUsageUnavailable" : "CodexAccountUsageCaption")}</p>
+        </div>
+      )}
 
       <DesktopPeerBanner status={peer} />
       {isRemote && <p className="settings-section__caption">{t("DesktopPeerDataHelp")}</p>}

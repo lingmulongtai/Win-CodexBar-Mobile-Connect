@@ -1839,3 +1839,7 @@ DiscordUsageTrackingOff = Turn on Usage & Spend tracking to show token totals.
 DiscordUsageHidden = All token display options are off.
 DiscordGithubTest = Open link
 DiscordUsageLocalOnly = D~/W~/M~ count currently readable local files; deleted history is not included. Other values may be unavailable.
+
+CodexAccountLifetime = Codex account lifetime tokens
+CodexAccountUsageCaption = Codex profile total. Model and cost estimates below use local history.
+CodexAccountUsageUnavailable = Codex account total is unavailable.
