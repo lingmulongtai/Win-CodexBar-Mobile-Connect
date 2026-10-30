@@ -5,6 +5,7 @@ use super::*;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DiscordOptionsPatch {
+    application_id: Option<String>,
     priority: Option<String>,
     format: Option<String>,
     show_model: Option<bool>,
@@ -26,6 +27,9 @@ pub struct DiscordOptionsPatch {
 
 impl DiscordOptionsPatch {
     fn apply(self, target: &mut codexbar::settings::DiscordPresenceOptions) {
+        if let Some(value) = self.application_id {
+            target.application_id = value.trim().to_owned();
+        }
         macro_rules! apply_fields { ($($field:ident),*) => { $(if let Some(value) = self.$field { target.$field = value; })* }; }
         apply_fields!(
             priority,
@@ -185,6 +189,16 @@ pub struct SettingsUpdate {
 
 impl SettingsUpdate {
     fn validate_platform(&self, windows: bool) -> Result<(), String> {
+        if let Some(value) = self
+            .discord_presence_options
+            .as_ref()
+            .and_then(|v| v.application_id.as_deref())
+        {
+            let value = value.trim();
+            if !value.is_empty() && !codexbar::settings::is_valid_discord_application_id(value) {
+                return Err("Discord Application ID must be a nonzero 64-bit numeric ID".into());
+            }
+        }
         if !windows
             && (self.start_at_login == Some(true)
                 || self.show_notifications == Some(true)
@@ -942,6 +956,34 @@ pub(crate) fn update_settings_checked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discord_application_id_patch_validates_and_preserves_other_options() {
+        let mut settings = Settings::default();
+        let valid: SettingsUpdate = serde_json::from_str(
+            r#"{"discordPresenceOptions":{"applicationId":" 123456789012345678 "}}"#,
+        )
+        .unwrap();
+        valid.validate_platform(true).unwrap();
+        valid.apply_to(&mut settings).unwrap();
+        assert_eq!(
+            settings.discord_presence_options.application_id,
+            "123456789012345678"
+        );
+        assert!(settings.discord_presence_options.show_model);
+        for id in ["0", "abc", "18446744073709551616"] {
+            let patch: SettingsUpdate = serde_json::from_value(
+                serde_json::json!({"discordPresenceOptions":{"applicationId":id}}),
+            )
+            .unwrap();
+            assert!(patch.validate_platform(true).is_err());
+        }
+        let clear: SettingsUpdate =
+            serde_json::from_str(r#"{"discordPresenceOptions":{"applicationId":""}}"#).unwrap();
+        clear.validate_platform(true).unwrap();
+        clear.apply_to(&mut settings).unwrap();
+        assert!(settings.discord_presence_options.application_id.is_empty());
+    }
 
     #[test]
     fn discord_option_patches_preserve_unrelated_choices() {
