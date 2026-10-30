@@ -64,7 +64,6 @@ mod windows {
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
     use tokio::sync::watch;
 
-    const APPLICATION_ID: &str = "1564892477213638746";
     const INTERVAL: Duration = Duration::from_secs(20);
     const IO_TIMEOUT: Duration = Duration::from_secs(5);
     const MAX_FRAME: usize = 64 * 1024;
@@ -140,19 +139,29 @@ mod windows {
         }
     }
 
-    async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S) -> io::Result<()> {
-        let handshake = json!({"v": 1, "client_id": APPLICATION_ID}).to_string();
+    async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
+        stream: &mut S,
+        application_id: &str,
+    ) -> io::Result<()> {
+        if !codexbar::settings::is_valid_discord_application_id(application_id) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Invalid Discord Application ID",
+            ));
+        }
+        let handshake = json!({"v": 1, "client_id": application_id}).to_string();
         write_frame(stream, 0, handshake.as_bytes()).await?;
         response(stream, None).await
     }
 
-    async fn connect() -> io::Result<NamedPipeClient> {
+    async fn connect(application_id: &str) -> io::Result<NamedPipeClient> {
         for index in 0..10 {
             let path = format!(r"\\?\pipe\discord-ipc-{index}");
             let Ok(mut stream) = ClientOptions::new().open(path) else {
                 continue;
             };
-            let result = tokio::time::timeout(IO_TIMEOUT, handshake(&mut stream)).await;
+            let result =
+                tokio::time::timeout(IO_TIMEOUT, handshake(&mut stream, application_id)).await;
             if matches!(result, Ok(Ok(()))) {
                 return Ok(stream);
             }
@@ -321,6 +330,22 @@ mod windows {
                 tokio::task::yield_now().await;
                 continue;
             };
+            let application_id = codexbar::settings::Settings::load()
+                .discord_presence_options
+                .application_id
+                .trim()
+                .to_owned();
+            if !codexbar::settings::is_valid_discord_application_id(&application_id) {
+                if let Some(mut current) = stream.take() {
+                    let _result = set_activity(&mut current, None).await;
+                }
+                super::publish_snapshot(generation, "needsApplicationId", None, "unavailable");
+                if enabled.changed().await.is_err() {
+                    break;
+                }
+                clear_before_refresh = true;
+                continue;
+            }
             let scanner = LocalAgentSessionScanner::default();
             let scan = tokio::select! {
                 biased;
@@ -530,7 +555,7 @@ mod windows {
                 tokio::select! {
                     biased;
                     changed = enabled.changed() => { if changed.is_err() { break; } clear_before_refresh = true; continue; },
-                    result = connect() => { stream = result.ok(); }
+                    result = connect(&application_id) => { stream = result.ok(); }
                 }
             }
             let collecting = match selected {
@@ -728,33 +753,42 @@ mod windows {
             let mut settings: codexbar::settings::Settings = serde_json::from_str("{}").unwrap();
             assert!(!settings.discord_presence_enabled);
             settings.discord_presence_enabled = true;
+            settings.discord_presence_options.application_id = "123456789012345678".into();
             let saved = serde_json::to_value(&settings).unwrap();
             let restored: codexbar::settings::Settings = serde_json::from_value(saved).unwrap();
             assert!(restored.discord_presence_enabled);
             let portable =
                 codexbar::settings::PreferencesDocument::from_settings(&settings).unwrap();
             assert!(!portable.to_json().contains("discord_presence_enabled"));
+            assert!(!portable.to_json().contains("123456789012345678"));
         }
 
         #[test]
-        fn rpc_handshake_waits_for_ready_with_the_owned_application_id() {
+        fn rpc_handshake_uses_the_configured_application_id() {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap();
             runtime.block_on(async {
-                let (mut client, mut server) = tokio::io::duplex(4096);
-                let server_task = tokio::spawn(async move {
-                    let (opcode, body) = read_frame(&mut server).await.unwrap();
-                    assert_eq!(opcode, 0);
-                    let request: Value = serde_json::from_slice(&body).unwrap();
-                    assert_eq!(request, json!({"v": 1, "client_id": APPLICATION_ID}));
-                    write_frame(&mut server, 1, br#"{"evt":"READY"}"#)
-                        .await
-                        .unwrap();
-                });
-                handshake(&mut client).await.unwrap();
-                server_task.await.unwrap();
+                for id in ["123456789012345678", "987654321098765432"] {
+                    let (mut client, mut server) = tokio::io::duplex(4096);
+                    let server_task = tokio::spawn(async move {
+                        let (opcode, body) = read_frame(&mut server).await.unwrap();
+                        assert_eq!(opcode, 0);
+                        let request: Value = serde_json::from_slice(&body).unwrap();
+                        assert_eq!(request, json!({"v": 1, "client_id": id}));
+                        write_frame(&mut server, 1, br#"{"evt":"READY"}"#)
+                            .await
+                            .unwrap();
+                    });
+                    handshake(&mut client, id).await.unwrap();
+                    server_task.await.unwrap();
+                }
+                let (mut client, _server) = tokio::io::duplex(4096);
+                assert_eq!(
+                    handshake(&mut client, "bad-id").await.unwrap_err().kind(),
+                    io::ErrorKind::InvalidInput
+                );
             });
         }
 
