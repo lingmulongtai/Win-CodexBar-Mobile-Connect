@@ -2667,3 +2667,28 @@ fn antigravity_additional_profile_homes_default_empty_and_round_trip() {
     );
 }
 mod unreadable_file;
+#[test]
+fn discord_application_id_defaults_empty_and_preserves_the_exact_string() {
+    let legacy: super::DiscordPresenceOptions = serde_json::from_str("{}").unwrap();
+    assert!(legacy.application_id.is_empty());
+    let id = "123456789012345678";
+    let settings: super::DiscordPresenceOptions =
+        serde_json::from_str(&format!(r#"{{"applicationId":"{id}"}}"#)).unwrap();
+    assert_eq!(settings.application_id, id);
+    assert_eq!(serde_json::to_value(settings).unwrap()["applicationId"], id);
+    assert!(super::is_valid_discord_application_id(id));
+    for invalid in [
+        "",
+        "0",
+        "-1",
+        "1.0",
+        "１２３",
+        "18446744073709551616",
+        "000000000000000000001",
+    ] {
+        assert!(
+            !super::is_valid_discord_application_id(invalid),
+            "{invalid}"
+        );
+    }
+}
