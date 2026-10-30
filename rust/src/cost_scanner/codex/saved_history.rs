@@ -140,4 +140,32 @@ mod tests {
         load(&mut cache, &[temp.path().join("other")], temp.path());
         assert!(cache.codex_saved_rows.is_empty());
     }
+    #[test]
+    fn deleted_history_does_not_guess_a_long_context_request_price() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("sessions");
+        fs::create_dir(&root).unwrap();
+        let data = json!({"version":1,"backup_sha256":"a".repeat(64),"root":root,
+        "sessions":[{"session_id":"saved-id","rows":[{
+            "timestamp":"2035-01-01T12:00:00Z","day_key":"old","model":"gpt-6-astra",
+            "input":300000,"cached":0,"output":5,"source_end_offset":42,
+            "pricing":{"pricing_model":"gpt-6-astra","pricing_mode":"standard"}
+        }]}]});
+        fs::write(
+            temp.path().join("saved-codex-history.json"),
+            data.to_string(),
+        )
+        .unwrap();
+        let mut cache = CostUsageCache::default();
+        load(&mut cache, &[root], temp.path());
+        super::super::cache_days::rebuild_cache_days(&mut cache);
+        let date = cache.codex_saved_rows["saved-id"][0].day_key.clone();
+        let day = CostUsageDayRange::parse_day_key(&date).unwrap();
+        let range = CostUsageDayRange::new(day, day);
+        let mut summary = CostSummary::default();
+        add_codex_days_map_to_summary(&mut summary, &cache.days, &range);
+        super::super::cache_days::price_summary_from_source_rows(&mut summary, &cache, &range);
+        assert_eq!(summary.input_tokens, 300000);
+        assert!(summary.model_pricing_completeness.is_partial());
+    }
 }

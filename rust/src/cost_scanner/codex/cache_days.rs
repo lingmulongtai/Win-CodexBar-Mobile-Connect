@@ -239,6 +239,17 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
             if !CostUsageDayRange::is_in_range(&row.day_key, &range.since_key, &range.until_key) {
                 continue;
             }
+            // The source file is gone, so a nonlinear aggregate cannot be
+            // verified as one request. Keep its tokens but report it unpriced.
+            let model = row_priced_model(row, None)
+                .unwrap_or_else(|| CostUsagePricing::CODEX_UNATTRIBUTED_MODEL.to_string());
+            if !linear_price_matches(&model, row.input, row.cached, row.output, &row.day_key) {
+                data.missing
+                    .entry(row.day_key.clone())
+                    .or_default()
+                    .insert(model);
+                continue;
+            }
             let mut packed = vec![row.input, row.cached, row.output];
             if let Some(reasoning) = row.reasoning {
                 packed.push(reasoning);
@@ -249,7 +260,7 @@ fn source_request_prices(cache: &CostUsageCache, range: &CostUsageDayRange) -> C
             ] {
                 if let Some(cost) = crate::codex_costs::add_codex_packed_tokens_to_summary(
                     target,
-                    &row.model,
+                    &model,
                     &packed,
                     CostUsageDayRange::parse_day_key(&row.day_key),
                 ) {
