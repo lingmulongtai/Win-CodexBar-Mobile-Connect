@@ -30,7 +30,12 @@ fn root_key(path: &Path) -> String {
 
 pub(super) fn load(cache: &mut CostUsageCache, roots: &[PathBuf], base: &Path) {
     cache.codex_saved_rows.clear();
-    let path = base.join("saved-codex-history.json");
+    for filename in ["saved-codex-history.json", "saved-codex-history-extra.json"] {
+        load_one(cache, roots, &base.join(filename));
+    }
+}
+
+fn load_one(cache: &mut CostUsageCache, roots: &[PathBuf], path: &Path) {
     if fs::metadata(&path).is_ok_and(|m| m.len() > 8 * 1024 * 1024) {
         return;
     }
@@ -49,7 +54,10 @@ pub(super) fn load(cache: &mut CostUsageCache, roots: &[PathBuf], base: &Path) {
     }
     let mut ids = HashSet::new();
     for session in saved.sessions {
-        if session.session_id.is_empty() || !ids.insert(session.session_id.clone()) {
+        if session.session_id.is_empty()
+            || cache.codex_saved_rows.contains_key(&session.session_id)
+            || !ids.insert(session.session_id.clone())
+        {
             continue;
         }
         let mut rows = session.rows;
@@ -113,9 +121,17 @@ mod tests {
             data.to_string(),
         )
         .unwrap();
+        let mut extra = data.clone();
+        extra["sessions"][0]["session_id"] = json!("extra-id");
+        fs::write(
+            temp.path().join("saved-codex-history-extra.json"),
+            extra.to_string(),
+        )
+        .unwrap();
         let mut cache = CostUsageCache::default();
         load(&mut cache, std::slice::from_ref(&root), temp.path());
-        assert_eq!(active_rows(&cache).count(), 1);
+        assert_eq!(active_rows(&cache).count(), 2);
+        cache.codex_saved_rows.remove("extra-id");
         super::super::cache_days::rebuild_cache_days(&mut cache);
         let date = cache.codex_saved_rows["saved-id"][0].day_key.clone();
         assert_eq!(cache.days[&date]["gpt-6-astra"], vec![100, 10, 5, 3]);
