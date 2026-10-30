@@ -111,6 +111,8 @@ impl LowPowerModePreference {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DiscordPresenceOptions {
+    /// Discord Application (Client) ID, stored as a string to preserve snowflake precision.
+    pub application_id: String,
     pub priority: String,
     pub format: String,
     pub show_model: bool,
@@ -133,6 +135,7 @@ pub struct DiscordPresenceOptions {
 impl Default for DiscordPresenceOptions {
     fn default() -> Self {
         Self {
+            application_id: String::new(),
             priority: "recent".into(),
             format: "detailed".into(),
             show_model: true,
@@ -152,6 +155,14 @@ impl Default for DiscordPresenceOptions {
             pet_active_motion: "running".into(),
         }
     }
+}
+
+/// A Discord snowflake is a nonzero unsigned 64-bit integer represented as text.
+pub fn is_valid_discord_application_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 20
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u64>().is_ok_and(|id| id != 0)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
