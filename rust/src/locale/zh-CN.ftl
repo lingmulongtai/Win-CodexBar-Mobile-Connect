@@ -1793,6 +1793,11 @@ DesktopPeerDataHelp = 用量、历史和费用来自所选电脑，采用该电�
 NativeFeatureWindowsOnly = 此原生集成功能目前仅支持Windows。
 MacManualUpdatesHelper = 从本应用的发布页面下载Mac DMG，退出应用，然后替换Applications中的应用。
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Enter your Discord Developer Portal Application ID. Do not enter a Bot Token or Client Secret. Leave blank to disconnect.
+DiscordApplicationIdInvalid = Enter a valid numeric Application ID.
+DiscordApplicationIdRequired = Enter an Application ID to connect to Discord.
+DiscordPreviewAppName = Application name set in Developer Portal
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = 应用运行期间持续显示 Discord 状态，并在可用时共享服务、模型、推理强度、速度、会话经过时间和本机令牌总数。不会共享项目名称、路径或对话。令牌显示需要成本跟踪，检测结果为估算。
 

@@ -1795,6 +1795,11 @@ NativeFeatureWindowsOnly = This native integration is currently available on Win
 
 MacManualUpdatesHelper = Download the Mac DMG from this app’s Releases page, quit the app, and replace it in Applications.
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Enter your Discord Developer Portal Application ID. Do not enter a Bot Token or Client Secret. Leave blank to disconnect.
+DiscordApplicationIdInvalid = Enter a valid numeric Application ID.
+DiscordApplicationIdRequired = Enter an Application ID to connect to Discord.
+DiscordPreviewAppName = Application name set in Developer Portal
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = Shows a persistent Discord status, including the service, model, effort, speed, session elapsed time and local token totals when available. Project names, paths and conversations are not shared. Token data requires cost tracking; detection is approximate.
 

@@ -1793,6 +1793,11 @@ DesktopPeerDataHelp = Kullanım, geçmiş ve harcamalar seçili PC’den gelir; 
 NativeFeatureWindowsOnly = Bu yerel entegrasyon şu anda yalnızca Windows’ta kullanılabilir.
 MacManualUpdatesHelper = Uygulamanın sürümler sayfasından Mac DMG dosyasını indirin, uygulamayı kapatın ve Applications içindeki uygulamayı değiştirin.
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Enter your Discord Developer Portal Application ID. Do not enter a Bot Token or Client Secret. Leave blank to disconnect.
+DiscordApplicationIdInvalid = Enter a valid numeric Application ID.
+DiscordApplicationIdRequired = Enter an Application ID to connect to Discord.
+DiscordPreviewAppName = Application name set in Developer Portal
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = Uygulama çalışırken Discord durumunda kullanılabilir hizmet, model, akıl yürütme düzeyi, hız, oturum süresi ve yerel token toplamları gösterilir. Proje adları, yollar ve konuşmalar paylaşılmaz. Tokenlar için maliyet takibi gerekir; algılama yaklaşıktır.
 

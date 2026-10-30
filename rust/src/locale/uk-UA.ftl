@@ -1795,6 +1795,11 @@ DesktopPeerDataHelp = Використання, історія й витрати
 NativeFeatureWindowsOnly = Ця системна інтеграція наразі доступна лише у Windows.
 MacManualUpdatesHelper = Завантажте Mac DMG зі сторінки випусків програми, закрийте програму й замініть її в Applications.
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Enter your Discord Developer Portal Application ID. Do not enter a Bot Token or Client Secret. Leave blank to disconnect.
+DiscordApplicationIdInvalid = Enter a valid numeric Application ID.
+DiscordApplicationIdRequired = Enter an Application ID to connect to Discord.
+DiscordPreviewAppName = Application name set in Developer Portal
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = Показує статус у Discord: сервіс, модель, рівень міркувань, швидкість, час сеансу та локальні підсумки токенів, коли вони доступні. Проєкти, шляхи й розмови не передаються. Для токенів потрібне відстеження витрат; виявлення приблизне.
 

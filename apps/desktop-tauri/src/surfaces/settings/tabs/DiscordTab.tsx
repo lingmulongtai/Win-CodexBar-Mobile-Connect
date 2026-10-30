@@ -7,6 +7,7 @@ import type { LocaleKey } from "../../../i18n/keys";
 import type { TabProps } from "../settingsTabs";
 
 const defaults: DiscordPresenceOptions = {
+  applicationId: "",
   priority: "recent", format: "detailed", showModel: true, showMode: true,
   showElapsed: true, showSessionTokens: true, showToday: true, showWeek: true,
   showMonth: true, showCodexLifetime: false, showGithub: true, githubUrl: "", showEmoji: true, imageUrl: "", petUrl: "", petIdleMotion: "idle", petActiveMotion: "running",
@@ -18,6 +19,31 @@ const fields: [keyof DiscordPresenceOptions, LocaleKey][] = [
   ["showMonth", "DiscordShowMonth"], ["showCodexLifetime", "DiscordShowCodexLifetime"], ["showGithub", "DiscordShowGithub"],
   ["showEmoji", "DiscordShowEmoji"],
 ];
+
+function validApplicationId(value: string): boolean {
+  return /^[0-9]{1,20}$/.test(value) && BigInt(value) > 0n && BigInt(value) <= 18446744073709551615n;
+}
+
+function ApplicationId({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  const aria = useFieldAria();
+  const { t } = useLocale();
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => { if (!editing) { setDraft(value); setInvalid(false); } }, [value, editing]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next && !validApplicationId(next)) { setInvalid(true); return; }
+    if (next !== value) onChange(next);
+    setEditing(false);
+  };
+  return <div><input className="text-input discord-application-id" type="text" inputMode="numeric" autoComplete="off" {...aria}
+    value={draft} disabled={disabled} aria-invalid={invalid} placeholder="123456789012345678"
+    onFocus={() => setEditing(true)} onChange={(e) => { setDraft(e.target.value); setInvalid(false); }}
+    onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+    {invalid && <div role="alert">{t("DiscordApplicationIdInvalid")}</div>}
+  </div>;
+}
 
 function ImageUrl({ value, onChange, disabled }: { value: string; onChange: (v: string, petUrl: string) => void; disabled: boolean }) {
   const aria = useFieldAria();
@@ -140,13 +166,16 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
       <Field label={t("DiscordPresenceLabel")} description={t("DiscordPresenceHelper")}>
         <Toggle variant="switch" checked={settings.discordPresenceEnabled ?? false} disabled={saving} onChange={(value) => set({ discordPresenceEnabled: value })} />
       </Field>
+      <Field label={t("DiscordApplicationId")} description={t("DiscordApplicationIdHelp")}>
+        <ApplicationId value={options.applicationId} disabled={saving} onChange={(applicationId) => change({ applicationId })} />
+      </Field>
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPreview")} footer={t("DiscordPreviewHelp")}>
       {activity ? <>
         <div className="discord-preview">
           <div className="discord-preview__body">
             {activity.assets?.large_image && <img src={activity.assets.large_image} alt="" />}
-            <div><strong>Win-CodexBar + Mobile Connect</strong>
+            <div><strong>{t("DiscordPreviewAppName")}</strong>
               {activity.details && <div>{activity.details}</div>}
               {activity.state && <div>{activity.state}</div>}
               {activity.timestamps?.start != null && <div>{elapsed(activity.timestamps.start, now)} elapsed</div>}
@@ -159,7 +188,7 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
           {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
         </div>
         <p role="status">{t(usageLabels[snapshot!.usage])}</p>
-      </> : <p role="status">{t(failed ? "DiscordLiveError" : snapshot?.status === "disabled" ? "DiscordLiveDisabled" : "DiscordLiveConnecting")}</p>}
+      </> : <p role="status">{t(failed ? "DiscordLiveError" : snapshot?.status === "disabled" ? "DiscordLiveDisabled" : snapshot?.status === "needsApplicationId" ? "DiscordApplicationIdRequired" : "DiscordLiveConnecting")}</p>}
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPriority")}>
       <Field label={t("DiscordPriority")}><Select value={options.priority} disabled={saving} onChange={(value) => change({ priority: value as DiscordPresenceOptions["priority"] })} options={[
