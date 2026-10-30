@@ -1793,6 +1793,11 @@ NativeFeatureWindowsOnly = この機能は現在Windows版のみ対応してい�
 
 MacManualUpdatesHelper = このアプリのリリースページからMac用DMGをダウンロードし、アプリを終了してApplications内のアプリを置き換えてください。
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Discord Developer Portal の Application ID を入力してください。Bot Token や Client Secret は入力しないでください。空欄では接続しません。
+DiscordApplicationIdInvalid = 有効な数字の Application ID を入力してください。
+DiscordApplicationIdRequired = Discord に接続するには Application ID を入力してください。
+DiscordPreviewAppName = Developer Portal で設定したアプリ名
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = アプリの起動中、Discord にステータスを表示します。取得できる場合はサービス名、モデル、effort、速度モード、セッション経過時間、ローカルのトークン使用量を共有します。プロジェクト名・パス・会話は送信しません。トークン表示にはコスト追跡が必要で、検出は推定です。
 

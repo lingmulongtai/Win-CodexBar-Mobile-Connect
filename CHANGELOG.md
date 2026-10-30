@@ -9,6 +9,7 @@
 
 ## [Windows] Unreleased
 
+- Discord: configure or clear your own Application ID in Settings; changing it reconnects Rich Presence, and an empty ID leaves it disconnected.
 - Usage & Spend: retain previous period snapshots during refresh, warm common periods while the app is running, and show when the displayed snapshot was last updated. Known parts of incomplete model estimates remain visible and are labeled partial.
 - Codex API list-price estimates: bundle the published GPT-6 Sol and GPT-6.1 Sol/Terra rates, apply the official long-context threshold, and account for supported Fast rates by model and date. Subscription charges are not calculated.
 - Discord: optionally share the Codex account lifetime and select separate animated Codex Pets motions for idle and active work. The public conversion service receives the chosen public pet name.
