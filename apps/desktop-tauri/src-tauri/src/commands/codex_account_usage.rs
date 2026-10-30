@@ -81,10 +81,10 @@ async fn response(
         if line.len() > 2_000_000 {
             return Err("Codex response was too large".into());
         }
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-            if value.get("id").and_then(|v| v.as_u64()) == Some(id) {
-                return Ok(value);
-            }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
+            && value.get("id").and_then(|v| v.as_u64()) == Some(id)
+        {
+            return Ok(value);
         }
     }
     Err("Codex app server closed unexpectedly".into())
