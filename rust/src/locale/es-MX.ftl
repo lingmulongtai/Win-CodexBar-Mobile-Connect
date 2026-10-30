@@ -1792,6 +1792,11 @@ DesktopPeerDataHelp = El uso, historial y gastos provienen de la PC seleccionada
 NativeFeatureWindowsOnly = Esta integración nativa está disponible actualmente solo en Windows.
 MacManualUpdatesHelper = Descarga el DMG de Mac desde las versiones de esta aplicación, cierra la app y reemplázala en Applications.
 
+DiscordApplicationId = Application ID
+DiscordApplicationIdHelp = Enter your Discord Developer Portal Application ID. Do not enter a Bot Token or Client Secret. Leave blank to disconnect.
+DiscordApplicationIdInvalid = Enter a valid numeric Application ID.
+DiscordApplicationIdRequired = Enter an Application ID to connect to Discord.
+DiscordPreviewAppName = Application name set in Developer Portal
 DiscordPresenceLabel = Discord Rich Presence
 DiscordPresenceHelper = Muestra un estado persistente en Discord con servicio, modelo, esfuerzo, velocidad, tiempo transcurrido y totales locales de tokens cuando estén disponibles. No comparte proyectos, rutas ni conversaciones. Los tokens requieren seguimiento de costos; la detección es aproximada.
 

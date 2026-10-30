@@ -16,6 +16,44 @@ describe("DiscordTab", () => {
       details: "⚡ Claude Code · claude-sonnet", state: "📊 D 12k", buttons: [{ label: "View on GitHub", url: "https://github.com/example/project" }],
     } });
   });
+
+  it("saves a numeric Application ID as an exact string", async () => {
+    const set = vi.fn();
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
+    const input = screen.getByRole("textbox", { name: "DiscordApplicationId" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "123456789012345678" } });
+    fireEvent.blur(input);
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { applicationId: "123456789012345678" } });
+  });
+
+  it("allows an existing Application ID to be cleared", async () => {
+    const set = vi.fn();
+    const settings = { discordPresenceOptions: { applicationId: "123456789012345678" } } as SettingsSnapshot;
+    render(<DiscordTab settings={settings} set={set} saving={false} />);
+    await screen.findByText("DiscordUsageAvailable");
+    const input = screen.getByRole("textbox", { name: "DiscordApplicationId" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { applicationId: "" } });
+  });
+
+  it("rejects invalid IDs and explains when an ID is required", async () => {
+    const set = vi.fn();
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "needsApplicationId", usage: "unavailable", activity: null });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);
+    expect(await screen.findByText("DiscordApplicationIdRequired")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "DiscordApplicationId" });
+    for (const value of ["not-a-client-id", "0", "18446744073709551616", "123456789012345678901"]) {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+      expect(screen.getByRole("alert")).toHaveTextContent("DiscordApplicationIdInvalid");
+    }
+    expect(set).not.toHaveBeenCalled();
+  });
   it("lets the user opt in to sharing the Codex account lifetime", async () => {
     const set = vi.fn();
     render(<DiscordTab settings={{} as SettingsSnapshot} set={set} saving={false} />);

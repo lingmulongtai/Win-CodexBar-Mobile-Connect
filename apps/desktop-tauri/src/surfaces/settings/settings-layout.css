@@ -1956,4 +1956,4 @@
 .discord-preview__body img { width: 76px; height: 76px; object-fit: contain; border-radius: 10px; background: #111; }
 .discord-preview__body strong { font-size: 15px; }
 .discord-preview__button { display: block; width: 100%; border: 0; color: inherit; cursor: pointer; margin-top: 14px; padding: 8px; background: #4e5058; border-radius: 4px; text-align: center; }
-.discord-image-url { width: min(280px, 100%); }
+.discord-image-url, .discord-application-id { width: min(280px, 100%); }
