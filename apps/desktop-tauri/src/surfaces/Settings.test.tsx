@@ -238,19 +238,18 @@ describe("Settings sidebar", () => {
     fireEvent.keyDown(row("codex"), { key: "ArrowDown", altKey: true });
     expect(mocks.reorderVisibleProviders).not.toHaveBeenCalled();
 
-    fireEvent.click(optionsButton());
-    expect(screen.getByRole("menuitemcheckbox", { name: "ProviderSidebarShowEnabledOnly" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "ProviderSidebarShowEnabledOnly" }));
+    const filter = screen.getByRole("button", { name: "ProviderSidebarShowEnabledOnly" });
+    expect(filter).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(filter);
     expect(mocks.update).toHaveBeenCalledWith({ providersEnabledOnly: false });
   });
 
-  it("turns the enabled-only option on from the options menu", () => {
+  it("turns the enabled-only filter on from the Providers heading", () => {
     render(<Settings state={state} />);
-    fireEvent.click(optionsButton());
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "ProviderSidebarShowEnabledOnly" }));
+    const filter = screen.getByRole("button", { name: "ProviderSidebarShowEnabledOnly" });
+    expect(screen.getByText("TabProviders").parentElement).toContainElement(filter);
+    expect(filter).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(filter);
     expect(mocks.update).toHaveBeenCalledWith({ providersEnabledOnly: true });
   });
 
