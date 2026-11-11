@@ -93,6 +93,7 @@ pub struct BrowserCookieScan<S: BrowserCookieStore = SystemCookieStore> {
     inner_index: usize,
     yielded: Vec<(BrowserType, String)>,
     app_bound_encryption_seen: bool,
+    locked_browser: Option<BrowserType>,
 }
 
 impl BrowserCookieScan<SystemCookieStore> {
@@ -115,6 +116,7 @@ impl<S: BrowserCookieStore> BrowserCookieScan<S> {
             inner_index: 0,
             yielded: Vec::new(),
             app_bound_encryption_seen: false,
+            locked_browser: None,
         }
     }
 
@@ -133,9 +135,7 @@ impl<S: BrowserCookieStore> BrowserCookieScan<S> {
         self
     }
 
-    /// The error that describes why the scan produced nothing (more): App-Bound
-    /// Encryption when it blocked any browser, `BrowserNotInstalled` when no
-    /// browser was found, otherwise `NotFound` for the scanned domains.
+    /// Why the scan produced no usable candidate.
     pub fn exhaustion_error(&self) -> CookieError {
         if self.app_bound_encryption_seen {
             CookieError::AppBoundEncryption
@@ -144,6 +144,13 @@ impl<S: BrowserCookieStore> BrowserCookieScan<S> {
         } else {
             CookieError::NotFound(self.domains.join(", "))
         }
+    }
+
+    /// Report a locked store even if another browser yielded a candidate.
+    /// Use after the provider has rejected every candidate.
+    pub fn exhaustion_error_with_lock(&self) -> CookieError {
+        self.locked_browser
+            .map_or_else(|| self.exhaustion_error(), CookieError::BrowserStoreLocked)
     }
 
     fn browsers(&mut self) -> &[DetectedBrowser] {
@@ -221,6 +228,9 @@ impl<S: BrowserCookieStore> Iterator for BrowserCookieScan<S> {
                     );
                     self.app_bound_encryption_seen = true;
                 }
+                Err(CookieError::BrowserStoreLocked(browser)) => {
+                    self.locked_browser.get_or_insert(browser);
+                }
                 Err(error) => {
                     tracing::debug!(
                         browser = browser_name,
@@ -247,6 +257,7 @@ pub(crate) mod test_support {
     pub(crate) enum FakeRead {
         Cookies(Vec<(&'static str, &'static str)>),
         AppBoundEncryption,
+        Locked,
         Failure,
     }
 
@@ -325,6 +336,9 @@ pub(crate) mod test_support {
                     })
                     .collect()),
                 Some(FakeRead::AppBoundEncryption) => Err(CookieError::AppBoundEncryption),
+                Some(FakeRead::Locked) => {
+                    Err(CookieError::BrowserStoreLocked(browser.browser_type))
+                }
                 Some(FakeRead::Failure) => Err(CookieError::Decryption("fake".into())),
             }
         }
@@ -378,6 +392,22 @@ mod tests {
         assert_eq!(second.browser, BrowserType::Brave);
         assert_eq!(second.header(), "session=valid");
         assert!(scan.next().is_none());
+    }
+
+    #[test]
+    fn locked_browser_does_not_stop_scan_and_is_reported_on_exhaustion() {
+        let store = FakeCookieStore::default()
+            .with(BrowserType::Vivaldi, "a.test", FakeRead::Locked)
+            .cookies(BrowserType::Firefox, "a.test", &[("session", "valid")]);
+        let mut scan = BrowserCookieScan::with_store(&store, &["a.test"]);
+
+        assert_eq!(scan.next().unwrap().browser, BrowserType::Firefox);
+        assert!(scan.next().is_none());
+        assert!(matches!(
+            scan.exhaustion_error_with_lock(),
+            CookieError::BrowserStoreLocked(BrowserType::Vivaldi)
+        ));
+        assert!(matches!(scan.exhaustion_error(), CookieError::NotFound(_)));
     }
 
     #[test]
