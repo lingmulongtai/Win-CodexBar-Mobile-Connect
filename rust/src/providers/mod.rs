@@ -356,6 +356,14 @@ impl<S: crate::browser::session_scan::BrowserCookieStore> BrowserCookieSessions<
                 map_browser_cookie_error(scan.exhaustion_error())
             })
     }
+
+    pub(crate) fn exhaustion_error_with_lock(&self) -> crate::core::ProviderError {
+        self.scan
+            .as_ref()
+            .map_or(crate::core::ProviderError::NoCookies, |scan| {
+                map_browser_cookie_error(scan.exhaustion_error_with_lock())
+            })
+    }
 }
 
 impl<S: crate::browser::session_scan::BrowserCookieStore> Iterator for BrowserCookieSessions<S> {

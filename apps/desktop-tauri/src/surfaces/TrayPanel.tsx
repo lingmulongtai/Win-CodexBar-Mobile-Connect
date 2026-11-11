@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, type CSSProperties } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BootstrapState, ProviderUsageSnapshot, UsageSpendSummary } from "../types/bridge";
 import type { LocaleKey } from "../i18n/keys";
 import { costPeriodShortLabel } from "../lib/costPeriod";
@@ -213,11 +214,48 @@ function OverviewSpendSummary({
       setSummary(null);
       return () => { cancelled = true; };
     }
-    // No explicit period: the backend resolves the saved History window.
-    void getUsageSpendSummary()
-      .then((value) => { if (!cancelled) setSummary(value); })
-      .catch(() => { if (!cancelled) setSummary(null); });
-    return () => { cancelled = true; };
+    let request = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unlisteners: UnlistenFn[] = [];
+    const load = () => {
+      if (cancelled) return;
+      const current = ++request;
+      // No explicit period: the backend resolves the saved History window.
+      void getUsageSpendSummary()
+        .then((value) => { if (!cancelled && current === request) setSummary(value); })
+        .catch(() => { if (!cancelled && current === request) setSummary(null); });
+    };
+    const schedule = () => {
+      if (cancelled) return;
+      clearTimeout(timer);
+      timer = setTimeout(load, 200);
+    };
+    const register = async (event: string, callback: () => void) => {
+      try {
+        const unlisten = await listen(event, callback);
+        if (cancelled) unlisten();
+        else unlisteners.push(unlisten);
+      } catch {
+        // The initial summary is still available if subscription fails.
+      }
+    };
+    void Promise.all([
+      register("provider-updated", schedule),
+      register("usage-spend-updated", schedule),
+      register("usage-spend-scope-changed", () => {
+        if (cancelled) return;
+        request++;
+        setSummary(null);
+        schedule();
+      }),
+    ]).then(() => {
+      if (!cancelled) load();
+    });
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      for (const unlisten of unlisteners) unlisten();
+    };
   }, [providerIds.join("|"), period, costTrackingEnabled, peer?.sourceId, peer?.lastReceived]);
 
   // Overview consumes the same backend spend catalog as Usage & Spend. Do not

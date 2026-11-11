@@ -41,6 +41,8 @@ pub enum CookieError {
 
     #[error("Browser not installed")]
     BrowserNotInstalled,
+    #[error("{} is holding its cookie database open. Close the browser completely and refresh, or use the Manual cookie source.", .0.display_name())]
+    BrowserStoreLocked(BrowserType),
 
     #[error("DPAPI error: {0}")]
     Dpapi(String),
@@ -102,9 +104,8 @@ impl CookieExtractor {
         domain: &str,
     ) -> Result<Vec<Cookie>, CookieError> {
         let mut all_cookies = Vec::new();
-        // Preserve the first ABE error seen so it can be surfaced when no cookies
-        // were recovered from any profile of this browser.
         let mut abe_error: Option<CookieError> = None;
+        let mut locked_error: Option<CookieError> = None;
 
         for profile in &browser.profiles {
             match Self::extract_profile_cookies(browser, profile, domain) {
@@ -119,6 +120,9 @@ impl CookieExtractor {
                         abe_error = Some(CookieError::AppBoundEncryption);
                     }
                 }
+                Err(error @ CookieError::BrowserStoreLocked(_)) => {
+                    locked_error = Some(error);
+                }
                 Err(e) => {
                     tracing::debug!(
                         "Failed to extract cookies from profile {}: {}",
@@ -129,12 +133,10 @@ impl CookieExtractor {
             }
         }
 
-        // If we obtained no cookies at all and every failure was ABE, surface that
-        // specific error so callers can try alternative browsers or manual import.
         if all_cookies.is_empty()
-            && let Some(abe_err) = abe_error
+            && let Some(error) = locked_error.or(abe_error)
         {
-            return Err(abe_err);
+            return Err(error);
         }
 
         Ok(all_cookies)
@@ -207,10 +209,8 @@ impl CookieExtractor {
 
         // Copy the database to a temp file (browser may have it locked)
         tracing::debug!("Copying cookies DB to temp...");
-        let temp_db = Self::copy_to_temp(&cookies_db).map_err(|e| {
-            tracing::debug!("Failed to copy cookies DB: {}", e);
-            e
-        })?;
+        let temp_db = Self::copy_to_temp(&cookies_db)
+            .map_err(|error| cookie_db_copy_error(error, browser.browser_type))?;
 
         let domain_pattern = format!("%{}", domain);
         let dot_domain_pattern = format!(".{}", domain);
@@ -651,6 +651,14 @@ impl CookieExtractor {
     }
 }
 
+fn cookie_db_copy_error(error: CookieError, browser: BrowserType) -> CookieError {
+    // ERROR_SHARING_VIOLATION from opening a running Chromium browser's database.
+    if cfg!(windows) && matches!(&error, CookieError::Io(io) if io.raw_os_error() == Some(32)) {
+        return CookieError::BrowserStoreLocked(browser);
+    }
+    error
+}
+
 fn domain_matches(host_key: &str, domain: &str) -> bool {
     let host = host_key.trim().trim_end_matches('.').to_ascii_lowercase();
     let domain = domain
@@ -739,6 +747,27 @@ pub fn get_cookie_header_from_browser(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_sharing_violation_reports_the_locked_browser() {
+        let error = cookie_db_copy_error(
+            std::io::Error::from_raw_os_error(32).into(),
+            BrowserType::Vivaldi,
+        );
+        assert!(matches!(
+            error,
+            CookieError::BrowserStoreLocked(BrowserType::Vivaldi)
+        ));
+        assert!(error.to_string().contains("Close the browser completely"));
+        assert!(matches!(
+            cookie_db_copy_error(
+                std::io::Error::from_raw_os_error(5).into(),
+                BrowserType::Vivaldi
+            ),
+            CookieError::Io(_)
+        ));
+    }
 
     #[test]
     fn domain_matching_requires_boundary() {

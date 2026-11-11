@@ -292,31 +292,9 @@ pub fn activity_for_session_with_options(
     });
     let mut labels = Vec::new();
     if let Some(tokens) = meta.tokens.filter(|_| options.show_session_tokens) {
-        labels.push(format!("S {}", compact_tokens(tokens)));
+        labels.push(usage_label("Session", "S", tokens, false, options));
     }
-    if let Some(p) = periods {
-        if options.show_today {
-            labels.push(format!(
-                "D{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.today)
-            ));
-        }
-        if options.show_week {
-            labels.push(format!(
-                "W{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.week)
-            ));
-        }
-        if options.show_month {
-            labels.push(format!(
-                "M{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.month)
-            ));
-        }
-    }
+    add_calendar_usage(&mut labels, periods, options);
     if !labels.is_empty() {
         activity["state"] = json!(format!("📊 {}", labels.join(" · ")));
     }
@@ -325,6 +303,46 @@ pub fn activity_for_session_with_options(
     }
     apply_presentation(&mut activity, options, true);
     activity
+}
+
+fn usage_label(
+    label: &str,
+    abbreviation: &str,
+    tokens: u64,
+    local_only: bool,
+    options: &DiscordPresenceOptions,
+) -> String {
+    let value = compact_tokens(tokens);
+    let estimate = if local_only { "~" } else { "" };
+    if options.format == "compact" {
+        format!("{abbreviation}{estimate} {value}")
+    } else {
+        format!("{label} {estimate}{value}")
+    }
+}
+
+fn add_calendar_usage(
+    labels: &mut Vec<String>,
+    periods: Option<UsagePeriods>,
+    options: &DiscordPresenceOptions,
+) {
+    if let Some(periods) = periods {
+        for (show, label, abbreviation, tokens) in [
+            (options.show_today, "Today", "D", periods.today),
+            (options.show_week, "Week", "W", periods.week),
+            (options.show_month, "Month", "M", periods.month),
+        ] {
+            if show {
+                labels.push(usage_label(
+                    label,
+                    abbreviation,
+                    tokens,
+                    periods.local_files_only,
+                    options,
+                ));
+            }
+        }
+    }
 }
 
 /// Add the separately sourced Codex account lifetime only when sharing is enabled.
@@ -388,6 +406,9 @@ pub fn apply_presentation(activity: &mut Value, options: &DiscordPresenceOptions
             }
         }
     }
+    if options.format == "usageFirst" && activity["state"].is_string() {
+        activity["status_display_type"] = json!(1);
+    }
     if options.format == "compact"
         && let Some(details) = activity["details"].as_str()
     {
@@ -431,29 +452,7 @@ pub fn idle_activity_with_options(
 ) -> Value {
     let mut activity = idle_activity_with_usage(provider, None);
     let mut labels = Vec::new();
-    if let Some(p) = periods {
-        if options.show_today {
-            labels.push(format!(
-                "D{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.today)
-            ));
-        }
-        if options.show_week {
-            labels.push(format!(
-                "W{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.week)
-            ));
-        }
-        if options.show_month {
-            labels.push(format!(
-                "M{} {}",
-                if p.local_files_only { "~" } else { "" },
-                compact_tokens(p.month)
-            ));
-        }
-    }
+    add_calendar_usage(&mut labels, periods, options);
     if !labels.is_empty() {
         activity["state"] = json!(format!("📊 {}", labels.join(" · ")));
     }
@@ -632,9 +631,32 @@ mod tests {
             &options,
         );
         assert_eq!(activity["details"], "Codex · idle");
-        assert_eq!(activity["state"], "W 2");
+        assert_eq!(activity["state"], "Week 2");
         assert!(activity.get("buttons").is_none());
         assert_eq!(activity["assets"]["large_image"], PET_ICON_URL);
+    }
+
+    #[test]
+    fn usage_first_highlights_only_available_and_enabled_totals() {
+        let options = DiscordPresenceOptions {
+            format: "usageFirst".into(),
+            show_week: false,
+            show_month: false,
+            ..DiscordPresenceOptions::default()
+        };
+        let activity = idle_activity_with_options(
+            Some(AgentSessionProvider::Codex),
+            Some(UsagePeriods {
+                today: 12_400,
+                ..UsagePeriods::default()
+            }),
+            &options,
+        );
+        assert_eq!(activity["state"], "📊 Today 12.4k");
+        assert_eq!(activity["status_display_type"], 1);
+        let missing = idle_activity_with_options(Some(AgentSessionProvider::Codex), None, &options);
+        assert!(missing["state"].is_null());
+        assert_eq!(missing["status_display_type"], 2);
     }
 
     #[test]
@@ -823,7 +845,10 @@ mod tests {
             }),
             &DiscordPresenceOptions::default(),
         );
-        assert_eq!(activity["state"], "📊 D~ 1.0k · W~ 2.0k · M~ 3.0k");
+        assert_eq!(
+            activity["state"],
+            "📊 Today ~1.0k · Week ~2.0k · Month ~3.0k"
+        );
     }
 
     #[test]
@@ -850,7 +875,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(activity["details"], "⚡ Claude Code · claude-sonnet-4-6");
-        assert_eq!(activity["state"], "📊 S 120 · D 2.0k · W 3.0k · M 4.0k");
+        assert_eq!(
+            activity["state"],
+            "📊 Session 120 · Today 2.0k · Week 3.0k · Month 4.0k"
+        );
         assert_eq!(activity["timestamps"]["start"], 1767229200);
         assert_eq!(activity["buttons"][0]["url"], REPOSITORY_URL);
         assert!(!activity.to_string().contains("private-project"));

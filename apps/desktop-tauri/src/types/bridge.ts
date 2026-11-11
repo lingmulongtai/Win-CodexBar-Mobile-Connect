@@ -241,7 +241,7 @@ export interface ProviderSummary {
 export interface DiscordPresenceOptions {
   applicationId: string;
   priority: "recent" | "codex" | "claude";
-  format: "detailed" | "compact" | "modelFirst" | "service";
+  format: "detailed" | "compact" | "modelFirst" | "service" | "usageFirst";
   showModel: boolean;
   showMode: boolean;
   showElapsed: boolean;
@@ -1804,11 +1804,12 @@ export interface HooksConfigSave {
 }
 
 export interface DiscordPresenceStatus {
-  status: "disabled" | "connecting" | "connected" | "needsApplicationId";
+  status: "disabled" | "connecting" | "connected" | "needsApplicationId" | "waitingForDiscord";
   usage: "available" | "localOnly" | "partial" | "partialLoading" | "loading" | "unavailable" | "trackingOff" | "hidden";
   activity: null | {
     details?: string;
     state?: string;
+    status_display_type?: number;
     timestamps?: { start?: number };
     assets?: { large_image?: string; large_text?: string };
     buttons?: { label: string; url: string }[];

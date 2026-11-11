@@ -328,7 +328,7 @@ export function SettingsSidebar({
         </button>
         <button
           type="button"
-          className={`settings-sidebar__filter${enabledOnly ? " settings-sidebar__filter--on" : ""}`}
+          className="settings-sidebar__filter"
           aria-haspopup="menu"
           aria-expanded={filterMenu !== null}
           aria-label={t("ProviderSidebarOptions")}
@@ -355,15 +355,8 @@ export function SettingsSidebar({
           onClose={() => setFilterMenu(null)}
           items={[
             {
-              label: t("ProviderSidebarShowEnabledOnly"),
-              disabled: saving,
-              checked: enabledOnly,
-              run: () => set({ providersEnabledOnly: !enabledOnly }),
-            },
-            {
               label: t("ProviderSidebarRestoreDefaultOrder"),
               disabled: saving,
-              separatorBefore: true,
               run: restoreOrder,
             },
             {
@@ -398,9 +391,18 @@ export function SettingsSidebar({
 
         <div className="settings-sidebar__section-header">
           <span>{t("TabProviders")}</span>
-          <span className="settings-sidebar__count">
+          <button
+            type="button"
+            className="settings-sidebar__enabled-only"
+            aria-label={t("ProviderSidebarShowEnabledOnly")}
+            aria-pressed={enabledOnly}
+            title={t("ProviderSidebarShowEnabledOnly")}
+            disabled={saving}
+            onClick={() => set({ providersEnabledOnly: !enabledOnly })}
+          >
+            <Glyph><path d="M2 3.5h12L9.5 8v3l-3 1.5V8Z" /></Glyph>
             {t("SettingsSidebarProvidersOnCount").replace("{}", String(enabledCount))}
-          </span>
+          </button>
         </div>
         <ProvidersSidebar
           providers={rows}

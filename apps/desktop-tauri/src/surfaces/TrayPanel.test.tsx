@@ -528,6 +528,56 @@ describe("TrayPanel provider grid", () => {
     expect(tauriMocks.getUsageSpendSummary.mock.calls.length).toBe(summaryCalls + 1);
   });
 
+  it("updates Overview spend after background spend publications without reopening the panel", async () => {
+    const summary = (amount: number) => ({
+      contract: {},
+      reportingPeriod: "rolling:7",
+      reportingDay: "2026-10-26",
+      dashboardTimezone: "UTC",
+      rows: [{
+        providerId: "codex", displayName: "Codex", periodCost: amount,
+        periodTokens: 100, currency: "USD", source: "local", includedInOverview: true,
+      }],
+    });
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(summary(70.31));
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    expect(await screen.findByText("$70.31")).toBeInTheDocument();
+    const initialReads = tauriMocks.getUsageSpendSummary.mock.calls.length;
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(summary(71.08));
+    act(() => {
+      emitEvent("usage-spend-updated", undefined);
+      emitEvent("usage-spend-updated", undefined);
+    });
+    expect(await screen.findByText("$71.08")).toBeInTheDocument();
+    expect(screen.queryByText("$70.31")).not.toBeInTheDocument();
+    expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(initialReads + 1);
+  });
+
+  it("does not let an older Overview scan overwrite newer spend", async () => {
+    const summary = (amount: number) => ({
+      contract: {}, reportingPeriod: "rolling:7", reportingDay: "2026-10-26",
+      dashboardTimezone: "UTC", rows: [{
+        providerId: "codex", displayName: "Codex", periodCost: amount,
+        periodTokens: 100, currency: "USD", source: "local", includedInOverview: true,
+      }],
+    });
+    tauriMocks.getUsageSpendSummary.mockResolvedValue(summary(70.31));
+    renderTrayPanel([provider("codex", "Codex", 35)]);
+    expect(await screen.findByText("$70.31")).toBeInTheDocument();
+    const initialReads = tauriMocks.getUsageSpendSummary.mock.calls.length;
+    let resolveOld!: (value: ReturnType<typeof summary>) => void;
+    tauriMocks.getUsageSpendSummary.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOld = resolve; }),
+    ).mockResolvedValue(summary(71.08));
+    act(() => emitEvent("usage-spend-updated", undefined));
+    await waitFor(() => expect(tauriMocks.getUsageSpendSummary).toHaveBeenCalledTimes(initialReads + 1));
+    act(() => emitEvent("usage-spend-updated", undefined));
+    expect(await screen.findByText("$71.08")).toBeInTheDocument();
+    await act(async () => resolveOld(summary(70.50)));
+    expect(screen.getByText("$71.08")).toBeInTheDocument();
+    expect(screen.queryByText("$70.50")).not.toBeInTheDocument();
+  });
+
   it("dismisses the tray panel on unmodified Escape", async () => {
     const { container } = renderTrayPanel([provider("claude", "Claude", 35)]);
 

@@ -24,11 +24,15 @@ use reqwest::{
     header::{ACCEPT, CONTENT_TYPE, COOKIE, LOCATION, ORIGIN, USER_AGENT},
 };
 
+use crate::browser::session_scan::BrowserCookieStore;
 use crate::core::{
     FetchContext, ManualEmptyCookiePolicy, Provider, ProviderError, ProviderFetchResult,
     ProviderId, ProviderMetadata, ProviderStateKind, SourceMode,
 };
-use crate::providers::{BoundedBodyError, read_bounded_response};
+use crate::providers::{
+    BoundedBodyError, BrowserCookieSessions, browser_cookie_sessions, normalize_cookie_header,
+    read_bounded_response,
+};
 
 const BASE_URL: &str = "https://muse.ai";
 const ORIGIN_VALUE: &str = "https://muse.ai";
@@ -124,7 +128,6 @@ impl MuseAIProvider {
     }
 
     async fn fetch_web(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
-        let cookie = session_cookie(ctx)?;
         let client = self.client.as_ref().ok_or_else(|| {
             ProviderError::Other("Could not create a secure muse.ai HTTP client.".into())
         })?;
@@ -133,10 +136,48 @@ impl MuseAIProvider {
             base_url: &self.base_url,
             timeout: Duration::from_secs(ctx.web_timeout.max(1)).min(REQUEST_TIMEOUT),
         };
-        // Windows has one session per refresh, so a rejected session is
-        // reported as expired right away.
-        let Some((reply, action_id)) = self.subscription(&site, &cookie).await? else {
-            return Err(ProviderError::Other(SESSION_EXPIRED.into()));
+        if let Some(raw) = ctx.manual_cookie_header.as_deref() {
+            let header = normalize_cookie_header(raw).ok_or_else(missing_session)?;
+            return self
+                .try_session(&site, &header)
+                .await?
+                .ok_or_else(|| ProviderError::Other(SESSION_EXPIRED.into()));
+        }
+        self.fetch_browser_sessions(&site, browser_cookie_sessions(ctx, &[COOKIE_DOMAIN]))
+            .await
+    }
+
+    async fn fetch_browser_sessions<S: BrowserCookieStore>(
+        &self,
+        site: &Site<'_>,
+        mut sessions: BrowserCookieSessions<S>,
+    ) -> Result<ProviderFetchResult, ProviderError> {
+        let mut rejected = false;
+        for header in sessions
+            .by_ref()
+            .filter_map(|header| normalize_cookie_header(&header))
+        {
+            if let Some(result) = self.try_session(site, &header).await? {
+                return Ok(result);
+            }
+            rejected = true;
+        }
+        match sessions.exhaustion_error_with_lock() {
+            ProviderError::NoCookies if rejected => {
+                Err(ProviderError::Other(SESSION_EXPIRED.into()))
+            }
+            ProviderError::NoCookies => Err(missing_session()),
+            error => Err(error),
+        }
+    }
+
+    async fn try_session(
+        &self,
+        site: &Site<'_>,
+        cookie: &str,
+    ) -> Result<Option<ProviderFetchResult>, ProviderError> {
+        let Some((reply, action_id)) = self.subscription(site, cookie).await? else {
+            return Ok(None);
         };
         if reply.status != 200 {
             return Err(http_failure(reply.status));
@@ -144,7 +185,7 @@ impl MuseAIProvider {
         let result = model::result(&reply.body)?;
         // Upstream saves the ID only after a usable subscription response.
         self.store_action_id(Some(action_id));
-        Ok(result)
+        Ok(Some(result))
     }
 
     /// Upstream `subscription`: the stored action first, then one
@@ -206,6 +247,10 @@ impl Provider for MuseAIProvider {
         true
     }
 
+    fn owns_browser_cookie_resolution(&self) -> bool {
+        true
+    }
+
     /// An empty Manual source fails closed with the sign-in message instead
     /// of reporting that cookies are disabled.
     fn manual_empty_cookie_policy(&self) -> ManualEmptyCookiePolicy {
@@ -222,26 +267,11 @@ impl Provider for MuseAIProvider {
     }
 }
 
-/// The pasted or shell-resolved Cookie header, else the selected browser's
-/// muse.ai cookies. Upstream sends whatever the session holds.
-fn session_cookie(ctx: &FetchContext) -> Result<String, ProviderError> {
-    let header = match ctx.manual_cookie_header.as_deref() {
-        Some(header) => crate::providers::normalize_cookie_header(header),
-        None if ctx.manual_cookie_missing => None,
-        None => match crate::providers::browser_cookie_header(&[COOKIE_DOMAIN]) {
-            Ok(header) => crate::providers::normalize_cookie_header(&header),
-            Err(error) => {
-                tracing::debug!(%error, "muse.ai browser session is unavailable");
-                None
-            }
-        },
-    };
-    header
-        .filter(|header| !header.trim().is_empty())
-        .ok_or_else(|| ProviderError::BrowserSignInRequired {
-            message: MISSING_SESSION.into(),
-            sign_in_url: SIGN_IN_URL.into(),
-        })
+fn missing_session() -> ProviderError {
+    ProviderError::BrowserSignInRequired {
+        message: MISSING_SESSION.into(),
+        sign_in_url: SIGN_IN_URL.into(),
+    }
 }
 
 fn http_failure(status: u16) -> ProviderError {

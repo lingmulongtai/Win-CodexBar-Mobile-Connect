@@ -78,7 +78,18 @@ pub(crate) fn build_fetch_context(
 ) -> FetchContext {
     let provider = instantiate_provider(id);
     let cookie_source = settings.cookie_source(id);
-    let stored_cookie = cookies.get(id.cli_name()).map(|s| s.to_string());
+    // These providers validate browser candidates themselves. An old manual
+    // header must not pin Automatic to a previously imported browser session.
+    let automatic_browser_session = matches!(cookie_source, "auto" | "browser" | "web")
+        && matches!(
+            id,
+            ProviderId::Manus | ProviderId::Grok | ProviderId::MuseAI
+        );
+    let stored_cookie = if automatic_browser_session {
+        None
+    } else {
+        cookies.get(id.cli_name()).map(str::to_owned)
+    };
     let stored_api_key = api_keys.get(id.cli_name()).map(|s| s.to_string());
     let token_override = token_accounts
         .get(&id)

@@ -11,6 +11,7 @@ use reqwest::header::HeaderValue;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
+use crate::browser::session_scan::BrowserCookieScan;
 use crate::core::{
     FetchContext, ManualEmptyCookiePolicy, Provider, ProviderError, ProviderFetchResult,
     ProviderId, ProviderMetadata, RateWindow, SourceMode, UsageSnapshot,
@@ -221,24 +222,16 @@ impl ManusProvider {
     /// on to the next), then the environment fallback.
     async fn fetch_automatic(
         &self,
-        browser_candidates: Result<Vec<(String, String)>, ProviderError>,
+        browser_candidates: Vec<(String, String)>,
+        browser_error: ProviderError,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<UsageSnapshot, ProviderError> {
         let mut attempts = Attempts::default();
-        // A browser read failure must not hide the environment fallback; keep
-        // it and report it only if nothing else works.
-        let mut browser_error = None;
-        match browser_candidates {
-            Ok(candidates) => {
-                for (source_label, header) in candidates {
-                    if let Some(snapshot) = self.try_candidate(&mut attempts, &header).await? {
-                        return Ok(snapshot);
-                    }
-                    tracing::debug!(source = %source_label, "Manus browser session not usable");
-                }
+        for (source_label, header) in browser_candidates {
+            if let Some(snapshot) = self.try_candidate(&mut attempts, &header).await? {
+                return Ok(snapshot);
             }
-            Err(ProviderError::NoCookies) => {}
-            Err(error) => browser_error = Some(error),
+            tracing::debug!(source = %source_label, "Manus browser session not usable");
         }
 
         if let Some(raw) = env_session_credential(&env)
@@ -247,10 +240,9 @@ impl ManusProvider {
             return Ok(snapshot);
         }
 
-        if attempts.rejected {
-            Err(ProviderError::AuthRequired)
-        } else {
-            Err(browser_error.unwrap_or(ProviderError::NoCookies))
+        match browser_error {
+            ProviderError::NoCookies if attempts.rejected => Err(ProviderError::AuthRequired),
+            error => Err(error),
         }
     }
 }
@@ -415,11 +407,21 @@ impl Provider for ManusProvider {
                             .into(),
                     ));
                 } else {
-                    self.fetch_automatic(
-                        crate::providers::browser_cookie_headers_for_domain(MANUS_COOKIE_DOMAIN),
-                        |name| std::env::var(name).ok(),
-                    )
-                    .await?
+                    let mut scan = BrowserCookieScan::new(&[MANUS_COOKIE_DOMAIN]);
+                    let candidates = scan
+                        .by_ref()
+                        .map(|candidate| {
+                            (
+                                candidate.browser.display_name().to_owned(),
+                                candidate.header(),
+                            )
+                        })
+                        .collect();
+                    let error = crate::providers::map_browser_cookie_error(
+                        scan.exhaustion_error_with_lock(),
+                    );
+                    self.fetch_automatic(candidates, error, |name| std::env::var(name).ok())
+                        .await?
                 };
                 Ok(ProviderFetchResult::new(snapshot, "web"))
             }

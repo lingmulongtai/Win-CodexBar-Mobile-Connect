@@ -391,6 +391,8 @@ static CODEX_PRICING: LazyLock<HashMap<&'static str, CodexPricing>> = LazyLock::
         ("gpt-6-sol", 2e-6, 2e-7, 1e-5),
         ("gpt-6.1-sol", 2e-6, 1e-7, 1e-5),
         ("gpt-6.1-terra", 1e-6, 5e-8, 5e-6),
+        // https://developers.openai.com/api/docs/models/gpt-6-luna
+        ("gpt-6-luna", 1e-7, 1e-8, 5e-7),
     ] {
         m.insert(
             model,
@@ -774,7 +776,9 @@ impl CostUsagePricing {
         let base = Self::codex_fast_base_model(model);
         match base.as_str() {
             "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
-            | "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" => Some(2.0),
+            | "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-luna" => {
+                Some(2.0)
+            }
             "gpt-5.5" => Some(2.5),
             _ => None,
         }

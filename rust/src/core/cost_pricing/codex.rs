@@ -153,7 +153,7 @@ pub(super) fn codex_cost_from_rates_with_cache_write(
 pub(super) fn codex_fast_allows_long_context(model: &str, pricing_date: Option<NaiveDate>) -> bool {
     let base = CostUsagePricing::codex_fast_base_model(model);
     match base.as_str() {
-        "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" => true,
+        "gpt-6-astra" | "gpt-6-sol" | "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-luna" => true,
         "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => pricing_date
             .is_none_or(|date| date >= NaiveDate::from_ymd_opt(2026, 8, 5).expect("valid cutoff")),
         _ => false,

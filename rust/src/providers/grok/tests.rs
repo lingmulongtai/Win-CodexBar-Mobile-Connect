@@ -39,6 +39,58 @@ async fn billing_request_encodes_explicit_false_in_a_nonempty_grpc_web_frame() {
 }
 
 #[tokio::test]
+async fn automatic_browser_retries_after_rejected_grok_session() {
+    use crate::browser::detection::BrowserType;
+    use crate::browser::session_scan::test_support::{FakeCookieStore, FakeRead};
+    use crate::providers::browser_cookie_sessions_from;
+
+    let mut server = mockito::Server::new_async().await;
+    let rejected = server
+        .mock("POST", "/billing")
+        .match_header("cookie", "sso=expired")
+        .with_status(401)
+        .expect(2)
+        .create_async()
+        .await;
+    let accepted = server
+        .mock("POST", "/billing")
+        .match_header("cookie", "sso=valid")
+        .with_status(200)
+        .with_body(billing_response_with_percent(37.0))
+        .create_async()
+        .await;
+    let provider =
+        GrokProvider::new().with_billing_endpoint_for_tests(format!("{}/billing", server.url()));
+    let ctx = FetchContext {
+        include_credits: false,
+        ..FetchContext::default()
+    };
+    let store = FakeCookieStore::default()
+        .cookies(BrowserType::Chrome, "grok.com", &[("sso", "expired")])
+        .cookies(BrowserType::Vivaldi, "grok.com", &[("sso", "valid")])
+        .browser(BrowserType::Firefox);
+    let sessions = browser_cookie_sessions_from(&store, &ctx, &["grok.com"]);
+    let (_, header) = provider
+        .fetch_browser_sessions(&ctx, sessions)
+        .await
+        .unwrap();
+    assert_eq!(header, "sso=valid");
+    assert_eq!(store.reads().len(), 2);
+
+    let store = FakeCookieStore::default()
+        .cookies(BrowserType::Chrome, "grok.com", &[("sso", "expired")])
+        .with(BrowserType::Vivaldi, "grok.com", FakeRead::Locked);
+    let sessions = browser_cookie_sessions_from(&store, &ctx, &["grok.com"]);
+    let error = provider
+        .fetch_browser_sessions(&ctx, sessions)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ProviderError::Other(message) if message.contains("Vivaldi")));
+    rejected.assert_async().await;
+    accepted.assert_async().await;
+}
+
+#[tokio::test]
 async fn oauth_billing_auth_failure_falls_back_to_configured_local_token() {
     let mut server = mockito::Server::new_async().await;
     let endpoint = format!("{}/billing", server.url());

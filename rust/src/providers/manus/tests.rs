@@ -19,11 +19,11 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
-fn candidates(headers: &[&str]) -> Result<Vec<(String, String)>, ProviderError> {
-    Ok(headers
+fn candidates(headers: &[&str]) -> Vec<(String, String)> {
+    headers
         .iter()
         .map(|header| ("Fixture".to_string(), (*header).to_string()))
-        .collect())
+        .collect()
 }
 
 async fn token_mock(
@@ -175,6 +175,7 @@ async fn rejected_candidates_advance_before_environment_fallback() {
                 "session_id=browser",
                 "session_id=browser",
             ]),
+            ProviderError::NoCookies,
             env_from(&[("MANUS_SESSION_TOKEN", "environment")]),
         )
         .await
@@ -246,7 +247,11 @@ async fn sparse_credits_and_numeric_dates_retain_native_projection() {
     let mock = token_mock(&mut server, "fixture", 200, body, 1).await;
 
     let snapshot = provider_for(&server)
-        .fetch_automatic(candidates(&["Session_ID = fixture"]), no_env)
+        .fetch_automatic(
+            candidates(&["Session_ID = fixture"]),
+            ProviderError::NoCookies,
+            no_env,
+        )
         .await
         .expect("sparse credits should parse");
 
@@ -276,6 +281,7 @@ async fn first_accepted_candidate_wins_and_later_ones_are_not_tried() {
     let snapshot = provider_for(&server)
         .fetch_automatic(
             candidates(&["session_id=first", "session_id=second"]),
+            ProviderError::NoCookies,
             no_env,
         )
         .await
@@ -295,6 +301,7 @@ async fn non_auth_failure_stops_iteration() {
     let error = provider_for(&server)
         .fetch_automatic(
             candidates(&["session_id=broken", "session_id=next"]),
+            ProviderError::NoCookies,
             no_env,
         )
         .await
@@ -315,6 +322,7 @@ async fn malformed_candidate_is_skipped_not_fatal() {
     let snapshot = provider_for(&server)
         .fetch_automatic(
             candidates(&["not-a-cookie; also bad", "a=b; c=d", "a=b; session_id=good"]),
+            ProviderError::NoCookies,
             no_env,
         )
         .await
@@ -331,19 +339,21 @@ async fn all_rejected_is_auth_required_and_none_is_no_cookies() {
     let provider = provider_for(&server);
 
     let rejected = provider
-        .fetch_automatic(candidates(&["session_id=only"]), no_env)
+        .fetch_automatic(
+            candidates(&["session_id=only"]),
+            ProviderError::NoCookies,
+            no_env,
+        )
         .await
         .unwrap_err();
     assert!(matches!(rejected, ProviderError::AuthRequired));
     only.assert_async().await;
 
     let none = provider
-        .fetch_automatic(Err(ProviderError::NoCookies), no_env)
+        .fetch_automatic(Vec::new(), ProviderError::NoCookies, no_env)
         .await
         .unwrap_err();
     assert!(matches!(none, ProviderError::NoCookies));
-    let empty = provider.fetch_automatic(candidates(&[]), no_env).await;
-    assert!(matches!(empty, Err(ProviderError::NoCookies)));
 }
 
 #[tokio::test]
@@ -354,9 +364,8 @@ async fn browser_read_failure_still_reaches_the_environment_fallback() {
 
     let snapshot = provider
         .fetch_automatic(
-            Err(ProviderError::Other(
-                "Failed to read browser cookies".into(),
-            )),
+            Vec::new(),
+            ProviderError::Other("Failed to read browser cookies".into()),
             env_from(&[("MANUS_SESSION_ID", "environment")]),
         )
         .await
@@ -364,16 +373,18 @@ async fn browser_read_failure_still_reaches_the_environment_fallback() {
     assert_eq!(snapshot.login_method.as_deref(), Some("Balance: 2 credits"));
     environment.assert_async().await;
 
+    let stale = token_mock(&mut server, "stale", 401, "expired", 1).await;
+    let locked = crate::providers::map_browser_cookie_error(
+        crate::browser::cookies::CookieError::BrowserStoreLocked(
+            crate::browser::detection::BrowserType::Vivaldi,
+        ),
+    );
     let error = provider
-        .fetch_automatic(
-            Err(ProviderError::Other(
-                "Failed to read browser cookies".into(),
-            )),
-            no_env,
-        )
+        .fetch_automatic(candidates(&["session_id=stale"]), locked, no_env)
         .await
         .unwrap_err();
-    assert!(matches!(error, ProviderError::Other(message) if message.contains("browser cookies")));
+    assert!(matches!(error, ProviderError::Other(message) if message.contains("Vivaldi")));
+    stale.assert_async().await;
 }
 
 // --- Response shape ---

@@ -93,6 +93,8 @@ describe("DiscordTab", () => {
     await screen.findByText("DiscordUsageAvailable");
     fireEvent.change(screen.getByRole("combobox", { name: "DiscordPriority" }), { target: { value: "codex" } });
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ discordPresenceOptions: expect.objectContaining({ priority: "codex" }) }));
+    fireEvent.change(screen.getByRole("combobox", { name: "DiscordFormat" }), { target: { value: "usageFirst" } });
+    expect(set).toHaveBeenCalledWith({ discordPresenceOptions: { format: "usageFirst" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "DiscordShowModel" }));
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ discordPresenceOptions: expect.objectContaining({ showModel: false }) }));
   });
@@ -155,6 +157,12 @@ describe("DiscordTab", () => {
     render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
     expect(await screen.findByText("DiscordLiveConnecting")).toBeInTheDocument();
     expect(screen.queryByText(/Claude Code/)).not.toBeInTheDocument();
+  });
+
+  it("explains why the live connection is waiting", async () => {
+    vi.mocked(getDiscordPresenceStatus).mockResolvedValueOnce({ status: "waitingForDiscord", usage: "unavailable", activity: null });
+    render(<DiscordTab settings={{} as SettingsSnapshot} set={vi.fn()} saving={false} />);
+    expect(await screen.findByText("DiscordLiveWaiting")).toBeInTheDocument();
   });
 
   it("explains that marked calendar totals exclude deleted files", async () => {
