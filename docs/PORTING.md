@@ -351,3 +351,32 @@ Safe Storage fixtures; the live Cursor account and DPAPI path were not tested.
 The frontend suite passed 1,371 tests, and `pnpm run build` and locale parity
 passed. Eighteen desktop pace-bridge tests passed. The final native build and
 runtime UI proof are tracked in the delivery report for this branch.
+
+
+---
+
+# Upstream review (2026-11-12)
+
+Fetched the read-only `nesszer/Win-CodexBar` default branch at
+`fd06294db4366bd1008ce2d32d6b6e7c0bb5b0d7`. The fork baseline was
+`3fbccb33690361d47dfb1bd0b1fa86effe31b5ce` and the merge base was
+`1e0a414cc10c6429a106f4674637427333518afa` (254 fork-side and 158 upstream-side commits).
+The 11 commits since the preceding review contain no Mobile Connect transport or
+Android pairing changes. This fork already carries background usage and spend
+snapshot updates for existing Mobile Connect clients.
+
+| Upstream commit | Fork commit | Behavior and focused validation |
+| --- | --- | --- |
+| `8d82e8ae1` (#1060) | `96845ef57` | Full-week Codex quota boundaries. All 11 quota-window tests passed. |
+| `66c9b1590` (#1059) | `dc614de1c` | Scope model-pricing evidence to the scan window. The partition and history-switch regressions passed. The cache rebuild keeps separately verified history available after the rebuild. |
+| `5b14c6928` (#1061) | `4554cdc9f` | Refresh Overview when a provider or the fork’s background spend job publishes. Debouncing and stale response tests passed. |
+| `6facf19cd` (#1062) | `a2e68c724` | Refresh day charts when usage changes and mark unpriced usage. All 10 focused chart tests passed, including the desktop peer receipt case. |
+
+The upstream tray redesign, movable/resizable panel, and float-bar layout
+(`be0a91817`, `fce4822b5`, `ab4970d1f`, `fd06294db`) overlap the fork's
+desktop-peer projection and saved display controls. A port needs dedicated
+compatibility and native window tests. The Claude logout change
+(`30247f2af`), Kiro login test change (`781865a95`), and upstream CI Node pin
+(`8c02dcc97`) are outside the updated provider and release paths. The
+previously deferred OpenCode accounting integration still needs verification
+against this fork’s restored history and Discord totals.
