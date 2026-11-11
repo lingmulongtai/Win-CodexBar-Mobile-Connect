@@ -557,6 +557,65 @@ async fn sign_in_redirects_and_forbidden_actions_report_an_expired_session() {
 }
 
 #[tokio::test]
+async fn automatic_browser_retries_a_signed_out_muse_ai_session() {
+    use crate::browser::detection::BrowserType;
+    use crate::browser::session_scan::test_support::{FakeCookieStore, FakeRead};
+    use crate::providers::browser_cookie_sessions_from;
+
+    let (base_url, log) = serve(|seen| {
+        assert_eq!(seen.method, "POST");
+        assert_eq!(seen.header("next-action"), Some(ACTION_ID));
+        match seen.header("cookie") {
+            Some("hatch_sess=stale") => reply(401, ""),
+            Some(COOKIE) => reply(200, FREE),
+            _ => panic!("unexpected fixture session"),
+        }
+    });
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
+    let provider = MuseAIProvider::with_client(&base_url, client, Some(ACTION_ID));
+    let site = Site {
+        client: provider.client.as_ref().unwrap(),
+        base_url: &provider.base_url,
+        timeout: Duration::from_secs(2),
+    };
+    let ctx = FetchContext::default();
+    let store = FakeCookieStore::default()
+        .cookies(
+            BrowserType::Chrome,
+            COOKIE_DOMAIN,
+            &[("hatch_sess", "stale")],
+        )
+        .cookies(
+            BrowserType::Vivaldi,
+            COOKIE_DOMAIN,
+            &[("hatch_sess", "fixture")],
+        )
+        .browser(BrowserType::Firefox);
+    let sessions = browser_cookie_sessions_from(&store, &ctx, &[COOKIE_DOMAIN]);
+    let result = provider
+        .fetch_browser_sessions(&site, sessions)
+        .await
+        .unwrap();
+    assert_eq!(result.usage.primary.used_percent, 28.0);
+    assert_eq!(store.reads().len(), 2);
+
+    let store = FakeCookieStore::default()
+        .cookies(
+            BrowserType::Chrome,
+            COOKIE_DOMAIN,
+            &[("hatch_sess", "stale")],
+        )
+        .with(BrowserType::Vivaldi, COOKIE_DOMAIN, FakeRead::Locked);
+    let sessions = browser_cookie_sessions_from(&store, &ctx, &[COOKIE_DOMAIN]);
+    let error = provider
+        .fetch_browser_sessions(&site, sessions)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ProviderError::Other(message) if message.contains("Vivaldi")));
+    assert_eq!(log.lock().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn a_signed_out_stored_action_keeps_the_id_and_expires() {
     let run = fetch(Options {
         action_status: 401,

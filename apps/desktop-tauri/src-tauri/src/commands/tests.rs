@@ -489,6 +489,43 @@ fn fetch_context_grok_manual_cookie_keeps_auto_for_switched_login() {
 }
 
 #[test]
+fn fetch_context_automatic_browser_sessions_ignore_saved_manual_cookies() {
+    for provider in [ProviderId::Manus, ProviderId::Grok, ProviderId::MuseAI] {
+        let mut settings = Settings::default();
+        settings.set_cookie_source(provider, "auto");
+        settings.set_usage_source(provider, "web");
+        let mut cookies = ManualCookies::default();
+        cookies.set(provider.cli_name(), "session=stale-manual");
+        let ctx = super::build_fetch_context(
+            provider,
+            &settings,
+            &cookies,
+            &ApiKeys::default(),
+            &HashMap::new(),
+        );
+        assert_eq!(ctx.source_mode, SourceMode::Web);
+        assert!(ctx.manual_cookie_header.is_none());
+        assert!(!ctx.manual_cookie_missing);
+    }
+}
+
+#[test]
+fn fetch_context_grok_explicit_web_with_empty_manual_cookie_fails_closed() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::Grok, "manual");
+    settings.set_usage_source(ProviderId::Grok, "web");
+    let ctx = super::build_fetch_context(
+        ProviderId::Grok,
+        &settings,
+        &ManualCookies::default(),
+        &ApiKeys::default(),
+        &HashMap::new(),
+    );
+    assert_eq!(ctx.source_mode, SourceMode::Web);
+    assert!(ctx.manual_cookie_missing);
+}
+
+#[test]
 fn fetch_context_grok_explicit_web_still_uses_manual_cookie() {
     let mut settings = Settings::default();
     settings.set_cookie_source(ProviderId::Grok, "manual");

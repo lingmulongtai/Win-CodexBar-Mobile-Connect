@@ -2,6 +2,32 @@
 //! `MusePluginTests.swift`): same paths, field names, and team/plan values.
 
 use super::*;
+
+#[test]
+fn browser_quota_keeps_the_lock_reason_and_only_uses_session_cookies() {
+    use crate::browser::session_scan::test_support::{FakeCookieStore, FakeRead};
+
+    let store = FakeCookieStore::default()
+        .cookies(
+            BrowserType::Chrome,
+            DEV_META_DOMAIN,
+            &[("consent", "fixture")],
+        )
+        .with(BrowserType::Vivaldi, DEV_META_DOMAIN, FakeRead::Locked)
+        .cookies(
+            BrowserType::Firefox,
+            DEV_META_DOMAIN,
+            &[(SESSION_COOKIE, "fixture")],
+        );
+    let sessions =
+        resolve_browser_sessions(BrowserCookieScan::with_store(&store, &[DEV_META_DOMAIN]));
+
+    assert_eq!(sessions.cookies, ["llama_dev_sess=fixture"]);
+    assert_eq!(
+        sessions.blocking_note,
+        Some(TeamNote::CookiesLocked(BrowserType::Vivaldi))
+    );
+}
 use std::sync::Mutex;
 
 const TEAM_ID: &str = "424242424242";

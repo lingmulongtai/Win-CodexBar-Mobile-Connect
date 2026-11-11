@@ -19,7 +19,9 @@ use serde_json::Value;
 use tokio::time::{Duration, timeout};
 
 use super::{MAX_RESET_SECONDS, WEEKLY_WINDOW_MINUTES};
-use crate::browser::cookies::{CookieError, get_cookie_headers_for_domain};
+use crate::browser::cookies::CookieError;
+use crate::browser::detection::BrowserType;
+use crate::browser::session_scan::{BrowserCookieScan, BrowserCookieStore};
 use crate::core::{
     FetchContext, ProviderDisplayDetail, ProviderFetchResult, RateWindow, UsageSnapshot,
 };
@@ -82,10 +84,11 @@ enum TeamNote {
     NoQuota,
     PlanDiffers,
     CookiesProtected,
+    CookiesLocked(BrowserType),
 }
 
 impl TeamNote {
-    fn message(self) -> &'static str {
+    fn message(self) -> String {
         match self {
             Self::ChooseTeam => "Choose a browser team in Muse Code settings",
             Self::TeamNotVisible => "The selected browser team is not visible to this session",
@@ -94,7 +97,8 @@ impl TeamNote {
             Self::CookiesProtected => {
                 "Browser cookies are protected by app-bound encryption; paste the Cookie header manually"
             }
-        }
+            Self::CookiesLocked(browser) => return CookieError::BrowserStoreLocked(browser).to_string(),
+        }.into()
     }
 }
 
@@ -193,12 +197,6 @@ pub(super) async fn fetch_reading(
     let identity = identity.clone();
     timeout(WEB_DEADLINE, async move {
         let sessions = resolve_sessions(access).await;
-        if sessions.cookies.is_empty() {
-            return sessions.protected.then(|| WebReading {
-                note: Some(TeamNote::CookiesProtected),
-                ..WebReading::default()
-            });
-        }
         read_team_quota(
             &ReqwestDevMeta::new(),
             &sessions.cookies,
@@ -207,6 +205,12 @@ pub(super) async fn fetch_reading(
             Utc::now(),
         )
         .await
+        .or_else(|| {
+            sessions.blocking_note.map(|note| WebReading {
+                note: Some(note),
+                ..WebReading::default()
+            })
+        })
     })
     .await
     .unwrap_or_else(|_| {
@@ -218,15 +222,14 @@ pub(super) async fn fetch_reading(
 struct Sessions {
     /// Cookie headers reduced to `llama_dev_sess=<value>`.
     cookies: Vec<String>,
-    /// Chromium app-bound encryption hid every browser cookie.
-    protected: bool,
+    blocking_note: Option<TeamNote>,
 }
 
 impl Sessions {
     fn none() -> Self {
         Self {
             cookies: Vec::new(),
-            protected: false,
+            blocking_note: None,
         }
     }
 }
@@ -236,35 +239,34 @@ async fn resolve_sessions(access: CookieAccess) -> Sessions {
         CookieAccess::Off => Sessions::none(),
         CookieAccess::Manual(raw) => Sessions {
             cookies: manual_session_cookie(&raw).into_iter().collect(),
-            protected: false,
+            blocking_note: None,
         },
-        CookieAccess::Browser => {
-            let scan =
-                tokio::task::spawn_blocking(|| get_cookie_headers_for_domain(DEV_META_DOMAIN))
-                    .await;
-            match scan {
-                Ok(Ok(headers)) => {
-                    let mut cookies: Vec<String> = Vec::new();
-                    for cookie in headers
-                        .iter()
-                        .filter_map(|(_, header)| session_cookie(header))
-                    {
-                        if !cookies.contains(&cookie) {
-                            cookies.push(cookie);
-                        }
-                    }
-                    Sessions {
-                        cookies,
-                        protected: false,
-                    }
-                }
-                Ok(Err(CookieError::AppBoundEncryption)) => Sessions {
-                    cookies: Vec::new(),
-                    protected: true,
-                },
-                _ => Sessions::none(),
-            }
+        CookieAccess::Browser => tokio::task::spawn_blocking(|| {
+            resolve_browser_sessions(BrowserCookieScan::new(&[DEV_META_DOMAIN]))
+        })
+        .await
+        .unwrap_or_else(|_| Sessions::none()),
+    }
+}
+
+fn resolve_browser_sessions<S: BrowserCookieStore>(mut scan: BrowserCookieScan<S>) -> Sessions {
+    let mut cookies = Vec::new();
+    for cookie in scan
+        .by_ref()
+        .filter_map(|candidate| session_cookie(&candidate.header()))
+    {
+        if !cookies.contains(&cookie) {
+            cookies.push(cookie);
         }
+    }
+    let blocking_note = match scan.exhaustion_error_with_lock() {
+        CookieError::AppBoundEncryption => Some(TeamNote::CookiesProtected),
+        CookieError::BrowserStoreLocked(browser) => Some(TeamNote::CookiesLocked(browser)),
+        _ => None,
+    };
+    Sessions {
+        cookies,
+        blocking_note,
     }
 }
 

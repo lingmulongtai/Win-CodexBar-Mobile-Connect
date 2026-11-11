@@ -20,10 +20,13 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+use crate::browser::session_scan::BrowserCookieStore;
 use crate::core::{
-    CostSnapshot, FetchContext, Provider, ProviderError, ProviderFetchResult, ProviderId,
-    ProviderInventoryItem, ProviderMetadata, RateWindow, SourceMode, UsageSnapshot,
+    CostSnapshot, FetchContext, ManualEmptyCookiePolicy, Provider, ProviderError,
+    ProviderFetchResult, ProviderId, ProviderInventoryItem, ProviderMetadata, RateWindow,
+    SourceMode, UsageSnapshot,
 };
+use crate::providers::{BrowserCookieSessions, browser_cookie_sessions};
 
 use self::accounts::{GrokAuthKind, ParsedGrokAuthFile};
 use self::billing::GrokBillingSnapshot;
@@ -284,7 +287,7 @@ impl GrokProvider {
     }
 
     async fn fetch_auto(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
-        let allow_browser_cookie_fallback = !ctx.auto_prefer_web;
+        let allow_browser_cookie_fallback = !ctx.auto_prefer_web && !ctx.manual_cookie_missing;
         for step in grok_auto_steps(
             ctx.api_key
                 .as_deref()
@@ -351,6 +354,10 @@ impl GrokProvider {
     ) -> Result<ProviderFetchResult, ProviderError> {
         use crate::browser::cookie_cache::CookieHeaderCache;
 
+        if ctx.manual_cookie_missing {
+            return Err(ProviderError::NoCookies);
+        }
+
         if let Some(cached) = CookieHeaderCache::load(ProviderId::Grok) {
             match self.fetch_with_cookie(&cached.cookie_header, ctx).await {
                 Ok(result) => return Ok(result),
@@ -361,12 +368,30 @@ impl GrokProvider {
             }
         }
 
-        let cookie_header = crate::providers::browser_cookie_header(&["grok.com"])?;
-        let result = self.fetch_with_cookie(&cookie_header, ctx).await?;
-        // Best-effort cache write: failing to persist the cookie only costs a
-        // re-read from the browser on the next fetch.
+        let sessions = browser_cookie_sessions(ctx, &["grok.com"]);
+        let (result, cookie_header) = self.fetch_browser_sessions(ctx, sessions).await?;
+        // Cache only a session the provider accepted.
         let _cached = CookieHeaderCache::store(ProviderId::Grok, &cookie_header, "browser");
         Ok(result)
+    }
+
+    async fn fetch_browser_sessions<S: BrowserCookieStore>(
+        &self,
+        ctx: &FetchContext,
+        mut sessions: BrowserCookieSessions<S>,
+    ) -> Result<(ProviderFetchResult, String), ProviderError> {
+        let mut rejected = false;
+        for header in sessions.by_ref() {
+            match self.fetch_with_cookie(&header, ctx).await {
+                Ok(result) => return Ok((result, header)),
+                Err(error) if is_cookie_authentication_failure(&error) => rejected = true,
+                Err(error) => return Err(error),
+            }
+        }
+        match sessions.exhaustion_error_with_lock() {
+            ProviderError::NoCookies if rejected => Err(ProviderError::AuthRequired),
+            error => Err(error),
+        }
     }
 
     async fn fetch_billing(
@@ -626,6 +651,14 @@ impl Provider for GrokProvider {
 
     fn supports_cli(&self) -> bool {
         true
+    }
+
+    fn owns_browser_cookie_resolution(&self) -> bool {
+        true
+    }
+
+    fn manual_empty_cookie_policy(&self) -> ManualEmptyCookiePolicy {
+        ManualEmptyCookiePolicy::FailClosedWeb
     }
 
     fn detect_version(&self) -> Option<String> {
