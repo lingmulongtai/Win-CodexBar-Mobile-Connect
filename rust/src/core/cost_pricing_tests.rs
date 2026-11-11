@@ -830,6 +830,7 @@ fn gpt6_bundled_standard_and_fast_prices_use_official_272k_threshold() {
         ("gpt-6-sol", 2.0, 0.2, 10.0),
         ("gpt-6.1-sol", 2.0, 0.1, 10.0),
         ("gpt-6.1-terra", 1.0, 0.05, 5.0),
+        ("gpt-6-luna", 0.10, 0.01, 0.50),
     ] {
         for amount in [200_001_u64, 272_000, 272_001] {
             let long = amount > 272_000;
