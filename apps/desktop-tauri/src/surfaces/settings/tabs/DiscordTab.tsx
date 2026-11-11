@@ -157,6 +157,13 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
   const activity = snapshot?.status === "connected" ? snapshot.activity : null;
+  const connectionLabels: Record<DiscordPresenceStatus["status"], LocaleKey> = {
+    disabled: "DiscordLiveDisabled",
+    connecting: "DiscordLiveConnecting",
+    connected: "DiscordLiveConnected",
+    needsApplicationId: "DiscordApplicationIdRequired",
+    waitingForDiscord: "DiscordLiveWaiting",
+  };
   const usageLabels: Record<DiscordPresenceStatus["usage"], LocaleKey> = {
     available: "DiscordUsageAvailable", localOnly: "DiscordUsageLocalOnly", partial: "DiscordUsagePartial", partialLoading: "DiscordUsagePartialLoading",
     loading: "DiscordUsageLoading", unavailable: "DiscordUsageUnavailable", trackingOff: "DiscordUsageTrackingOff", hidden: "DiscordUsageHidden",
@@ -173,12 +180,22 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
     <SettingsGroup title={t("DiscordPreview")} footer={t("DiscordPreviewHelp")}>
       {activity ? <>
         <div className="discord-preview">
+          <div className="discord-preview__status" role="status">{t("DiscordLiveConnected")}</div>
           <div className="discord-preview__body">
             {activity.assets?.large_image && <img src={activity.assets.large_image} alt="" />}
-            <div><strong>{t("DiscordPreviewAppName")}</strong>
-              {activity.details && <div>{activity.details}</div>}
-              {activity.state && <div>{activity.state}</div>}
-              {activity.timestamps?.start != null && <div>{elapsed(activity.timestamps.start, now)} elapsed</div>}
+            <div className="discord-preview__copy">
+              <strong>{t("DiscordPreviewAppName")}</strong>
+              {activity.details && <div className="discord-preview__details">{activity.details}</div>}
+              {activity.state && (
+                <div className="discord-preview__usage" data-highlighted={activity.status_display_type === 1}>
+                  {activity.state}
+                </div>
+              )}
+              {activity.timestamps?.start != null && (
+                <div className="discord-preview__elapsed">
+                  {t("DiscordElapsed").replace("{}", elapsed(activity.timestamps.start, now))}
+                </div>
+              )}
             </div>
           </div>
           {activity.buttons?.map((button) => <button key={button.url} type="button" className="discord-preview__button" onClick={() => {
@@ -187,14 +204,17 @@ export default function DiscordTab({ settings, set, saving }: TabProps) {
           }}>{button.label}</button>)}
           {linkError && <div role="alert">{t("DiscordGithubOpenError")}</div>}
         </div>
-        <p role="status">{t(usageLabels[snapshot!.usage])}</p>
-      </> : <p role="status">{t(failed ? "DiscordLiveError" : snapshot?.status === "disabled" ? "DiscordLiveDisabled" : snapshot?.status === "needsApplicationId" ? "DiscordApplicationIdRequired" : "DiscordLiveConnecting")}</p>}
+        <p className="discord-preview__note" role="status">{t(usageLabels[snapshot!.usage])}</p>
+      </> : <p className="discord-preview__note" role="status">
+        {t(failed ? "DiscordLiveError" : connectionLabels[snapshot?.status ?? "connecting"])}
+      </p>}
     </SettingsGroup>
     <SettingsGroup title={t("DiscordPriority")}>
       <Field label={t("DiscordPriority")}><Select value={options.priority} disabled={saving} onChange={(value) => change({ priority: value as DiscordPresenceOptions["priority"] })} options={[
         { value: "recent", label: t("DiscordPriorityRecent") }, { value: "codex", label: t("DiscordPriorityCodex") }, { value: "claude", label: t("DiscordPriorityClaude") },
       ]} /></Field>
       <Field label={t("DiscordFormat")}><Select value={options.format} disabled={saving} onChange={(value) => change({ format: value as DiscordPresenceOptions["format"] })} options={[
+        { value: "usageFirst", label: t("DiscordFormatUsageFirst") },
         { value: "detailed", label: t("DiscordFormatDetailed") }, { value: "compact", label: t("DiscordFormatCompact") },
         { value: "modelFirst", label: t("DiscordFormatModelFirst") }, { value: "service", label: t("DiscordFormatService") },
       ]} /></Field>

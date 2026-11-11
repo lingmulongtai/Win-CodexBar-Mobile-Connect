@@ -65,6 +65,7 @@ mod windows {
     use tokio::sync::watch;
 
     const INTERVAL: Duration = Duration::from_secs(20);
+    const CONNECT_RETRY: Duration = Duration::from_secs(3);
     const IO_TIMEOUT: Duration = Duration::from_secs(5);
     const MAX_FRAME: usize = 64 * 1024;
     const USAGE_INTERVAL: Duration = Duration::from_secs(300);
@@ -194,7 +195,8 @@ mod windows {
         let state = activity.get("state").and_then(Value::as_str);
         let has_session_tokens = state.is_some_and(|text| {
             text.split(" · ")
-                .any(|part| part.trim_start_matches("📊 ").starts_with("S "))
+                .map(|part| part.trim_start_matches("📊 "))
+                .any(|part| part.starts_with("S ") || part.starts_with("Session "))
         });
         let missing_session = has_session && options.show_session_tokens && !has_session_tokens;
         let missing_periods =
@@ -220,7 +222,7 @@ mod windows {
                 "unavailable"
             }
         } else if state.is_some_and(|text| {
-            ["D~ ", "W~ ", "M~ "]
+            ["D~ ", "W~ ", "M~ ", "Today ~", "Week ~", "Month ~"]
                 .iter()
                 .any(|label| text.contains(label))
         }) {
@@ -277,6 +279,7 @@ mod windows {
 
     async fn run(mut enabled: watch::Receiver<bool>) {
         let mut stream: Option<NamedPipeClient> = None;
+        let mut connected_application_id = String::new();
         let mut account_lifetime: Option<u64> = None;
         let mut account_task: Option<tokio::task::JoinHandle<Option<u64>>> = None;
         let mut account_refreshed: Option<Instant> = None;
@@ -315,17 +318,6 @@ mod windows {
                 }
                 continue;
             }
-            if clear_before_refresh {
-                if let Some(task) = account_task.take() {
-                    task.abort();
-                }
-                account_lifetime = None;
-                account_refreshed = None;
-                if let Some(mut current) = stream.take() {
-                    let _result = set_activity(&mut current, None).await;
-                }
-                clear_before_refresh = false;
-            }
             let Some(generation) = super::snapshot_generation() else {
                 tokio::task::yield_now().await;
                 continue;
@@ -335,16 +327,37 @@ mod windows {
                 .application_id
                 .trim()
                 .to_owned();
-            if !codexbar::settings::is_valid_discord_application_id(&application_id) {
-                if let Some(mut current) = stream.take() {
-                    let _result = set_activity(&mut current, None).await;
+            let application_changed = connected_application_id != application_id;
+            if clear_before_refresh || application_changed {
+                if let Some(current) = stream.as_mut()
+                    && (set_activity(current, None).await.is_err() || application_changed)
+                {
+                    stream = None;
                 }
+                clear_before_refresh = false;
+            }
+            if !codexbar::settings::is_valid_discord_application_id(&application_id) {
                 super::publish_snapshot(generation, "needsApplicationId", None, "unavailable");
                 if enabled.changed().await.is_err() {
                     break;
                 }
-                clear_before_refresh = true;
                 continue;
+            }
+            if stream.is_none() {
+                tokio::select! {
+                    biased;
+                    changed = enabled.changed() => { if changed.is_err() { break; } continue; }
+                    result = connect(&application_id) => { stream = result.ok(); }
+                }
+                if stream.is_none() {
+                    super::publish_snapshot(generation, "waitingForDiscord", None, "unavailable");
+                    tokio::select! {
+                        changed = enabled.changed() => { if changed.is_err() { break; } }
+                        () = tokio::time::sleep(CONNECT_RETRY) => {}
+                    }
+                    continue;
+                }
+                connected_application_id = application_id;
             }
             let scanner = LocalAgentSessionScanner::default();
             let scan = tokio::select! {
@@ -404,7 +417,16 @@ mod windows {
             }
             usage_day = Some(today);
             usage_context = Some(context);
-            if !tokens_enabled {
+            let show_periods = options.show_today || options.show_week || options.show_month;
+            if !tokens_enabled || !show_periods {
+                for task in &mut usage_tasks {
+                    if task
+                        .as_ref()
+                        .is_some_and(tokio::task::JoinHandle::is_finished)
+                    {
+                        *task = None;
+                    }
+                }
                 usage_task_valid = [false; 2];
                 usage = [None, None];
                 usage_refreshed = [None, None];
@@ -551,13 +573,6 @@ mod windows {
                 &options,
                 account_lifetime,
             );
-            if stream.is_none() {
-                tokio::select! {
-                    biased;
-                    changed = enabled.changed() => { if changed.is_err() { break; } clear_before_refresh = true; continue; },
-                    result = connect(&application_id) => { stream = result.ok(); }
-                }
-            }
             let collecting = match selected {
                 Some(Codex) => usage_tasks[0].is_some(),
                 Some(Claude) => usage_tasks[1].is_some(),
@@ -571,24 +586,55 @@ mod windows {
                 periods.is_some(),
                 collecting || account_task.is_some(),
             );
+            if super::snapshot_generation() != Some(generation) {
+                clear_before_refresh = true;
+                continue;
+            }
             if let Some(current) = stream.as_mut() {
-                let result = tokio::select! {
-                    biased;
-                    changed = enabled.changed() => { if changed.is_err() { break; } clear_before_refresh = true; None },
-                    result = set_activity(current, Some(activity.clone())) => Some(result),
-                };
-                if matches!(result, Some(Ok(()))) && *enabled.borrow() {
+                // Finish the bounded IPC exchange so a concurrent settings
+                // change can still clear the activity on the same pipe.
+                if set_activity(current, Some(activity.clone())).await.is_ok() {
                     super::publish_snapshot(generation, "connected", Some(activity), usage_status);
                 } else {
                     stream = None;
                     super::publish_snapshot(generation, "connecting", None, "unavailable");
                 }
-            } else {
-                super::publish_snapshot(generation, "connecting", None, "unavailable");
             }
+            match enabled.has_changed() {
+                Ok(true) => {
+                    clear_before_refresh = true;
+                    continue;
+                }
+                Ok(false) => {}
+                Err(_) => break,
+            }
+            let delay = if stream.is_some() {
+                INTERVAL
+            } else {
+                CONNECT_RETRY
+            };
+            // Wake when a background total becomes available, without
+            // repeating transcript or IPC work while the task is running.
+            let pending_usage = account_task.is_some() || usage_tasks.iter().any(Option::is_some);
+            let usage_ready = async {
+                loop {
+                    if account_task
+                        .as_ref()
+                        .is_some_and(tokio::task::JoinHandle::is_finished)
+                        || usage_tasks
+                            .iter()
+                            .flatten()
+                            .any(tokio::task::JoinHandle::is_finished)
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            };
             tokio::select! {
                 changed = enabled.changed() => { if changed.is_err() { break; } clear_before_refresh = true; },
-                () = tokio::time::sleep(INTERVAL) => {},
+                () = tokio::time::sleep(delay) => {},
+                () = usage_ready, if pending_usage => {},
             }
         }
     }
