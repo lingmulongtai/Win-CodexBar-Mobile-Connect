@@ -170,11 +170,12 @@ export default function MenuCard({
     setChartData(null);
   }, [provider.sourceLabel, provider.providerId, provider.accountEmail]);
 
-  // Re-read the local-usage chart when the local calendar day changes (seen on
-  // the next render, e.g. a provider update), so "Today" does not freeze at the
-  // first mount without a full transcript walk on every refresh.
+  // Provider refreshes may only update the timestamp. Re-read on changed
+  // usage, local day rollover, or receipt of a new shared snapshot.
   const localDay = new Date().toLocaleDateString("sv");
   const remoteUpdate = provider.sourceLabel?.startsWith("peer:") ? provider.peerReceivedAt ?? provider.updatedAt : null;
+  const usageRevision = [provider.primary?.usedPercent, provider.secondary?.usedPercent,
+    provider.tertiary?.usedPercent, provider.cost?.used].join("|");
   useEffect(() => {
     if (!providerSupportsChartData(provider.providerId)) return;
     let cancelled = false;
@@ -194,7 +195,7 @@ export default function MenuCard({
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
     // "Track costs" flips local estimates on or off; the backend answers for the new value.
-  }, [provider.sourceLabel, provider.providerId, provider.accountEmail, remoteUpdate, localDay, costTrackingEnabled, onLayoutChange]);
+  }, [provider.sourceLabel, provider.providerId, provider.accountEmail, remoteUpdate, usageRevision, localDay, costTrackingEnabled, onLayoutChange]);
 
   const isWayfinder = provider.providerId === "wayfinder";
   const email = isWayfinder ? null : headerAccount(provider, hideEmail);

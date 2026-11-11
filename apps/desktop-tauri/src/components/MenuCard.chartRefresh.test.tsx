@@ -107,6 +107,13 @@ describe("MenuCard chart refresh", () => {
     }
   });
 
+  it("refreshes on a quota change during the same day", async () => {
+    const { rerender } = render(card("initial"));
+    await waitFor(() => expect(tauriMocks.getProviderChartData).toHaveBeenCalledTimes(1));
+    rerender(card("changed", { primary: { ...window0, usedPercent: 30, remainingPercent: 70 } }));
+    await waitFor(() => expect(tauriMocks.getProviderChartData).toHaveBeenCalledTimes(2));
+  });
+
   it("refreshes shared cost data on receipt even when the sender's quota timestamp is unchanged", async () => {
     const { rerender } = render(card("unchanged", { sourceLabel: "peer:home:1|account", peerReceivedAt: 100 }));
     await waitFor(() => expect(tauriMocks.getProviderChartData).toHaveBeenCalledTimes(1));
