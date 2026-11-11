@@ -243,9 +243,8 @@ fn lithosai_exposes_a_cookie_source_picker_and_routes_each_choice() {
     assert!(ctx.manual_cookie_header.is_none());
 }
 
-/// Muse (muse.ai) is web-only: the picker chooses the session, a stored header
-/// always wins, an empty manual source fails closed without reading a browser,
-/// and off reaches the provider as Cli (its "cookies are disabled" error).
+/// Muse AI discovers sessions in Automatic and uses the saved header in
+/// Manual. Empty Manual fails closed and Off skips the browser.
 #[test]
 fn museai_exposes_a_cookie_source_picker_and_routes_each_choice() {
     let settings = Settings::default();
@@ -268,7 +267,7 @@ fn museai_exposes_a_cookie_source_picker_and_routes_each_choice() {
         );
         assert_eq!(
             ctx.manual_cookie_header.as_deref(),
-            Some(cookie),
+            (source == "manual").then_some(cookie),
             "{source}"
         );
         assert!(!ctx.manual_cookie_missing, "{source}");
